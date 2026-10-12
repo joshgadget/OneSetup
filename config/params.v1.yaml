@@ -1,0 +1,139 @@
+# Named, versioned parameters for the Trading Strategy Mathematical Specification v2.
+# Every convention or starting value in the spec is a parameter here, with its
+# source section in a comment. Entries marked [GAP] are interpretations we chose
+# because the spec is silent; each one is reported in DECISIONS.md.
+version: "params.v1"
+
+foundation:
+  atr_period: 14                       # Common foundation: n = 14, Wilder smoothing
+  atr_smoothing: wilder                # Common foundation: seed with SMA of first n TRs
+  pivot:
+    k_default: 3                       # Common foundation: k = 3 to 5; chosen default
+    k_by_timeframe:                    # [GAP] no per-timeframe default in spec
+      M15: 3
+      H1: 3
+      H4: 4
+      D1: 5
+    tie_rule: left_strict_right_nonstrict   # Common foundation formula ("> left, >= right")
+
+support_resistance:
+  gamma_mode: trailing_mean_abs_diff   # Live adaptations: m = 200 to start (or 0.25 x ATR)
+  gamma_window_m: 200                  # Live adaptations: m = 200
+  gamma_atr_multiple: 0.25             # Live adaptations: gamma = 0.25 x ATR alternative
+  discovery_window_i: 200              # [GAP] rolling window length not specified
+  horizon_omega: 5                     # [GAP] horizon upper bound omega not specified
+  bounce_event_basis: close            # [GAP] closes vs wicks for bounce/penetration events
+  break_buffer_atr: 0.10               # Break confirmation: C_t > b + 0.1 x ATR
+  stop_buffer_atr: 0.25                # Signal rule v1: stop at a - 0.25 x ATR
+  strength_floor: 0.50                 # Signal rule v1: Bayesian strength must exceed 0.5
+  round_number:
+    enabled: false                     # Live adaptations: optional test, off until evidence
+    step: null                         # e.g. 0.0050 for GBPUSD
+
+supply_demand:
+  base_max_candles: 6                  # Base candles: 1 <= m <= 6
+  base_body_atr: 0.5                   # Base candles: beta = 0.5
+  leg_in_candles: 5                    # Leg in: L_in = 5
+  leg_in_atr: 1.5                      # Leg in: alpha_in = 1.5
+  leg_out_candles: 5                   # Leg out: L_out = 5
+  leg_out_atr: 2.0                     # Leg out: alpha_out = 2
+  confirm_mode: first_satisfying_close # [GAP] confirm incrementally at first satisfying close
+  max_zone_width_atr: 1.5              # Zone lines: reject wider than 1.5 x ATR
+  invalidation_buffer_atr: 0.10        # Freshness and invalidation: dist -/+ 0.1 x ATR
+  stop_buffer_atr: 0.10                # Entry rule v1: stop at dist -/+ 0.1 x ATR
+
+order_block:
+  lookback_candles: 10                 # Order block: search back m = 10
+  zone_variant: full_range             # Order block: full range or body; name which one
+
+liquidity:
+  pool_cluster_atr: 0.10               # Liquidity pool: delta = 0.1 x ATR
+  grab_buffer_atr: 0.05                # Grab: eps = 0.05 x ATR
+  grab_reclaim_candles: 3              # Grab loose variant: r = 3
+  cluster_mode: single_linkage         # [GAP] transitive clustering rule
+  pool_level_update: on_new_confirmed_swing  # [GAP] level update rule
+  breakout_confirm_atr: 0.10           # [GAP] "closes beyond P and keeps going" needs a buffer
+  swept_pools_as_targets: false        # [GAP] exclude swept pools from target selection
+
+slp:
+  bias_timeframe: H4                   # SLP: HTF bias example H4, LTF M15
+  entry_timeframe: M15
+  protected_break_atr: 0.05            # SLP: close beyond protected level by 0.05 x ATR
+  mss_window_candles: 10               # SLP: lower-timeframe MSS within r = 10
+  poi_max_distance_atr: 3.0            # SLP: distance from price d <= 3
+  poi_entry_variant: proximal          # SLP: proximal edge, or midpoint as separate variant
+  poi_stop_buffer_atr: 0.10            # SLP: stop beyond farther of distal and swept extreme, -0.1 x ATR
+  entry_expiry_candles: 20             # [GAP] entry expiry not specified
+  cancel_buffer_atr: 0.05              # [GAP] close beyond swept extreme buffer
+
+smc:
+  bos_buffer_atr: 0.05                 # BOS: eps = 0.05 x ATR
+  displacement_body_atr: 1.0           # Displacement: alpha = 1.0 starting value
+  displacement_close_ratio: 0.75       # Displacement: q = 0.75 starting value
+  mss_require_liquidity_grab: false    # [GAP] standalone MSS default without grab condition
+  fvg_min_width_atr: 0.10              # FVG: drop gaps below 0.1 x ATR
+  fvg_mitigation: midpoint             # FVG: touch | midpoint | full; chosen default
+  entry_model_expiry_candles: 20       # [GAP] entry model expiry
+
+ict:
+  range_timeframe: H4                  # Dealing range: latest confirmed swing high/low
+  ote_low: 0.62                        # OTE: 62% to 79% retracement
+  ote_high: 0.79
+  sessions:
+    london:        {start: "02:00", end: "05:00", tz: "America/New_York"}   # rough; verify with educator
+    new_york:      {start: "07:00", end: "10:00", tz: "America/New_York"}   # rough; verify with educator
+    silver_bullet: {start: "10:00", end: "11:00", tz: "America/New_York"}   # commonly quoted
+  judas_window_candles: 6              # [GAP] first w candles of the session
+  judas_buffer_atr: 0.05               # [GAP] epsilon
+  po3_accumulation_candles: 4          # [GAP] accumulation window shape
+  po3_accumulation_max_width_atr: 1.0  # Power of three: total width below 1 x ATR
+
+crt:
+  reference_timeframe: H4              # CRT: 4 hour or daily reference
+  sweep_mode: wick_close_back_inside   # CRT: wick-only or close-based; pick one
+  sweep_reclaim_candles: 1             # CRT: sweep and reclaim same candle, or up to n = 1
+  buffer_atr: 0.05                     # CRT: eps = 0.05 x ATR
+  expiry_candles: 20                   # [GAP] cancellation horizon
+  min_range_width_atr: 0.5             # CRT filters: W_R >= 0.5 x ATR
+
+msnr:
+  pivot_k: 1                           # MSNR: k closes each side; k = 1 confirms after one candle
+  zone_gamma_atr: 0.10                 # Zone: gamma = max(gamma_min, 0.1 x ATR)
+  zone_gamma_min_ticks: 3              # [GAP] "a few ticks"
+  gap_theta_atr: 0.20                  # Gap level: theta = 0.2
+  freshness_lambda: 0.70               # Freshness: F = exp(-lambda N), lambda = 0.7
+  follow_up_candles: 5                 # Setup v1: CHoCH or MSS within r = 5
+  stop_buffer_atr: 0.25                # Setup v1: stop below zone minus 0.25 x ATR
+  zone_mode: close_based               # Setup v1: body-based zones are separate modules
+
+scoring:
+  baseline_formula: "1/(1+R)"          # p0 = 1/(1+R)
+  wilson_z: 1.96                       # Wilson 95% interval, z = 1.96
+  min_similar_cases: 100               # Show only with at least 100 similar past cases
+  ev_min: 0.0                          # Show only when EV is positive
+  likelihood: logistic                 # sigmoid(w^T x), fitted in Phase 7
+
+gate:
+  variance_ratio_q: [2, 4, 8]          # [GAP] q not specified in spec
+  variance_ratio_primary_q: 4
+  variance_ratio_test: lo_mackinlay_robust   # [GAP] significance test not specified
+  oos_fraction: 0.30                   # [GAP] out-of-sample fraction for the gate
+  min_resolved_candidates: 500         # [GAP] minimum sample per module/timeframe
+  min_bounce_entries: 1000             # [GAP] minimum level entries for bounce estimate
+
+markets:
+  forex:        {sessions: true,  weekend_gaps: true,  real_volume: false}
+  gold:         {sessions: true,  weekend_gaps: true,  real_volume: false, daily_break: true}
+  crypto_perp:  {sessions: false, weekend_gaps: false, real_volume: true,  funding: true, liquidation: true}
+  synthetic:    {sessions: false, weekend_gaps: false, real_volume: false, price_grid: true}
+  stale_feed_multiple: 2               # [GAP] max data age = 2 x timeframe
+  min_reward_risk_after_costs: 1.0     # [GAP] minimum R after costs
+
+execution:                             # Phase 6 backtester parameters, recorded now
+  spread_model: provider_typical
+  commission_per_lot: 0.0
+  slippage_atr: 0.0
+  limit_fill: touch
+  unresolved_expiry_exit: market       # [GAP] unresolved trades exit at expiry at market
+  funding_holding_period: median_time_to_resolution   # [GAP]
+  liquidation_stop_margin: max_0.25ATR_or_20pct       # [GAP] "comfortably inside P_liq"

@@ -1,0 +1,1 @@
+"""Trading analysis engine. Analysis only: no order execution in version 1."""
