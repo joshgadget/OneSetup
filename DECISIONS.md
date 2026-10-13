@@ -474,3 +474,14 @@ hide or show what the detectors found; nothing in the interface computes a level
 - **Secrets:** none are stored in the repo or in either platform's build config;
   `DERIV_APP_ID`, `CMC_API_KEY` (optional; quotes and listings only) and
   `ALLOWED_ORIGINS` are set in the Render dashboard.
+
+- **Render plan, revised (2026-10-13).** The first blueprint declared `plan: starter`
+  plus a disk, which a **free** Render workspace rejects outright, so the deploy would
+  have failed on a technicality rather than on anything real. The default `render.yaml`
+  is now the free variant (no disk, `plan: free`); the disk version moved to
+  `render.paid.yaml`. Both keep the same service name and the same `DB_PATH`, because
+  Render matches a blueprint to an existing service by name - renaming either one would
+  create a second service instead of updating the first. On free the store is rebuilt
+  from the providers after a redeploy: acceptable for a demonstration, not for daily
+  use. Source: Render's own docs on free instances (ephemeral filesystem, spin-down
+  after 15 idle minutes) read 2026-10-13.

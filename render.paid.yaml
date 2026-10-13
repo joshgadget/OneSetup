@@ -1,0 +1,25 @@
+# Render blueprint for the analysis API - PAID variant with a persistent candle store.
+#
+# Use this instead of render.yaml when you want the store to survive restarts and
+# redeploys. It needs a paid workspace: a persistent disk cannot be attached to a free
+# service. Everything else is identical - the same image, the same health check.
+services:
+  - type: web
+    name: onesetup-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    plan: starter
+    envVars:
+      - key: DB_PATH
+        value: /data/trading.sqlite3
+      - key: ALLOWED_ORIGINS
+        sync: false        # set to the Vercel domain in the dashboard
+      - key: DERIV_APP_ID
+        sync: false
+      - key: CMC_API_KEY
+        sync: false
+    disk:
+      name: onesetup-data
+      mountPath: /data
+      sizeGB: 1

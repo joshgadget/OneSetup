@@ -8,8 +8,13 @@ simulated and presented as a market result.
 
 ### Added
 - `Dockerfile` (python:3.11-slim) and `.dockerignore` for the API service, plus a
-  `Procfile` and a `render.yaml` blueprint (web service, `/health` check, 1 GB disk
-  at `/var/data`, `DATA_DIR` and `DB_PATH` pointed at it).
+  `Procfile` and two Render blueprints.
+- `render.yaml` is the **free-plan** variant (no disk), because a free Render workspace
+  rejects a blueprint that declares one - the first deploy now succeeds without a card.
+- `render.paid.yaml` is the same service on the starter plan with a 1 GB disk at `/data`,
+  where the candle store survives a redeploy. Both files keep the same service name and
+  the same `DB_PATH`, so switching between them updates one service instead of creating
+  a second, and neither orphans the store.
 - `apps/web/vercel.json` (Vite build, output directory) and `apps/web/.env.example`
   documenting `VITE_API_BASE`, the only thing the site needs to find the API.
 - `DEPLOY.md`: the step-by-step path for both halves, the two environment values
@@ -26,10 +31,12 @@ simulated and presented as a market result.
   carriage return in a Linux-run command is a silent deploy failure.
 
 ### Notes
-- The API is a long-running process with a disk, not a serverless function: the
-  candle store is SQLite, the providers are websocket/REST clients held open, and
-  Deriv history backfills can exceed a serverless timeout. It deploys to Render;
-  the website deploys to Vercel as static files.
+- The API is a long-running process, not a serverless function: the candle store is
+  SQLite, the providers are websocket/REST clients held open, and Deriv history
+  backfills can exceed a serverless timeout. It deploys to Render (with a disk on the
+  paid plan); the website deploys to Vercel as static files.
+- The verified trade-offs of the free Render plan are written down in DEPLOY.md rather
+  than discovered later: no disk, 0.1 CPU, and a spin-down after 15 idle minutes.
 - No secret is baked into any image or config in this repo; keys stay in the
   platform's environment settings.
 

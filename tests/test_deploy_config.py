@@ -70,9 +70,25 @@ def test_vercel_builds_the_web_app_from_its_own_directory():
     assert (ROOT / "apps/web/.env.example").exists()
 
 
-def test_render_blueprint_points_at_the_health_check_and_the_disk():
+def test_render_blueprint_deploys_on_the_free_plan_without_a_disk():
+    # A free workspace rejects a blueprint that declares a disk, so the default file
+    # must not contain one - otherwise the very first deploy fails for no good reason.
     blueprint = yaml.safe_load((ROOT / "render.yaml").read_text(encoding="utf-8"))
     service = blueprint["services"][0]
+    assert service["plan"] == "free"
+    assert "disk" not in service
     assert service["healthCheckPath"] == "/health"
     assert service["dockerfilePath"] == "./Dockerfile"
+
+
+def test_the_paid_blueprint_is_the_one_that_attaches_the_disk():
+    blueprint = yaml.safe_load((ROOT / "render.paid.yaml").read_text(encoding="utf-8"))
+    service = blueprint["services"][0]
+    assert service["plan"] != "free"
     assert service["disk"]["mountPath"] == "/data"
+    # Both variants must agree on the service name: Render matches a blueprint to an
+    # existing service by name, and a mismatch creates a duplicate instead of updating.
+    free = yaml.safe_load((ROOT / "render.yaml").read_text(encoding="utf-8"))
+    assert service["name"] == free["services"][0]["name"]
+    # And on the store path the image writes to, so switching variants never orphans data.
+    assert service["envVars"][0]["value"] == free["services"][0]["envVars"][0]["value"]

@@ -1,11 +1,20 @@
 # Render blueprint for the analysis API. The website goes to Vercel, see DEPLOY.md.
+#
+# This is the FREE-plan variant, because a free Render workspace cannot attach a disk
+# and rejects a blueprint that declares one. On free, /data is an ordinary directory
+# inside the instance: the candle store survives while the instance runs and is lost
+# when it is replaced or redeployed. Nothing breaks - every symbol is re-fetched from
+# the providers on demand - the first load of a symbol is just slower again.
+#
+# Want the store to persist? Use render.paid.yaml instead (same service, starter plan,
+# a 1 GB disk at /data). See DEPLOY.md.
 services:
   - type: web
     name: onesetup-api
     runtime: docker
     dockerfilePath: ./Dockerfile
     healthCheckPath: /health
-    plan: starter          # a persistent disk is not available on the free plan
+    plan: free
     envVars:
       - key: DB_PATH
         value: /data/trading.sqlite3
@@ -15,7 +24,3 @@ services:
         sync: false
       - key: CMC_API_KEY
         sync: false
-    disk:
-      name: onesetup-data
-      mountPath: /data
-      sizeGB: 1

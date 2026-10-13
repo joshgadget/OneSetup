@@ -16,20 +16,41 @@ analysis under 60s) - tell me and I will write that variant.
 
 ## 1. API first (Render)
 
+Render runs the Python API - the half that actually does the analysis. The website
+cannot work without it, so do this side first.
+
+**Choose the plan first, because it decides which blueprint file you use:**
+
+| | `render.yaml` (default) | `render.paid.yaml` |
+| --- | --- | --- |
+| Plan | free | starter (roughly $6-7/month, see render.com/pricing) |
+| Candle store | inside the instance; lost when the instance is replaced or redeployed | on a 1 GB disk at `/data`, survives |
+| Idles | spins down after 15 minutes without traffic | always on |
+| CPU | 0.1 | dedicated |
+
+Nothing breaks on free: when the store is empty the API fetches each symbol from the
+providers again. The cost is time - the first analysis of a symbol is slower, and the
+first click after an idle period waits for the instance to wake up.
+
 1. render.com -> **New** -> **Blueprint** -> pick `joshgadget/OneSetup`. `render.yaml` is
-   read automatically (Docker, health check `/health`, a 1 GB disk at `/data`).
+   read automatically (Docker, health check `/health`, free plan).
 2. Set the environment variables it asks for:
    - `DERIV_APP_ID` - your Deriv app id
-   - `CMC_API_KEY` - optional, only needed for CMC features
-   - `ALLOWED_ORIGINS` - leave empty for now, filled in step 3
+   - `CMC_API_KEY` - optional, only for CMC features
+   - `ALLOWED_ORIGINS` - leave empty for now, it is filled in after the site exists
 3. Wait for the deploy, then check `https://<your-api>.onrender.com/health` - it should
-   answer `status: ok` with the params hash.
-4. Optional but recommended: load history once from the Render shell so the first click is
-   fast instead of waiting on providers:
+   answer `status: ok` with the params hash. On a free instance the first request may
+   take a minute while it wakes up.
+4. Optional: load history once from the Render shell so the first click is fast instead
+   of waiting on the providers:
    ```bash
    python scripts/seed_store.py --symbols GBPUSD,XAUUSD,BTC/USD:BTC,R_75 --limit 1000
    ```
-   Nothing breaks without this: every symbol fetches on demand and is stored.
+   Nothing breaks without this. On the free plan the store is rebuilt from the providers
+   after a redeploy, so re-run it if you want the speed back.
+
+To switch to the paid variant, either ask me and I will make `render.paid.yaml` the
+default file, or point the Blueprint at that path if the dashboard offers a path field.
 
 Any other Docker host works the same way:
 
@@ -70,9 +91,11 @@ a source file is untracked, and `.env` is gitignored.
 
 ## 5. What to expect on cheap tiers (honest list)
 
-- Render free plan: no persistent disk (the candle store resets on deploy), the service
-  sleeps when idle and the first request after that is slow. The starter plan with the
-  1 GB disk is what `render.yaml` asks for.
+- Render free plan: no disk (the candle store is rebuilt after the instance is
+  replaced), 0.1 CPU, and it spins down after 15 minutes without traffic. An analysis
+  that takes 15-30 seconds locally will take minutes there, and the first click after an
+  idle period waits for the wake-up. `render.paid.yaml` is the always-on variant with
+  the 1 GB disk.
 - A fresh analysis is 15-30 seconds per symbol and timeframe, then cached for 10 minutes in
   that process. Run one worker: SQLite is happiest that way and the cache is per process.
 - Live mode polls every 20 seconds per open tab; the API throttles provider calls to one per
