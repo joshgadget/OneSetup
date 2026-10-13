@@ -41,6 +41,13 @@ supply_demand:
   max_zone_width_atr: 1.5              # Zone lines: reject wider than 1.5 x ATR
   invalidation_buffer_atr: 0.10        # Freshness and invalidation: dist -/+ 0.1 x ATR
   stop_buffer_atr: 0.10                # Entry rule v1: stop at dist -/+ 0.1 x ATR
+  score:                               # [GAP] weights fitted on training data in Phase 7
+    w1_departure: 0.25                 # until that fit exists these are provisional unit
+    w2_base: 0.25                      # weights, and no client-facing setup is produced
+    w3_freshness: 0.25                 # from them (DECISIONS.md D-005.18)
+    w4_range: 0.25
+    departure_max: 3.0                 # [GAP] D_max clamp not specified in the spec
+    freshness_lambda: 0.70             # [GAP] starting value reused from the MSNR section
 
 order_block:
   lookback_candles: 10                 # Order block: search back m = 10
