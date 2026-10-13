@@ -136,6 +136,13 @@ scoring:
   min_similar_cases: 100               # Show only with at least 100 similar past cases
   ev_min: 0.0                          # Show only when EV is positive
   likelihood: logistic                 # sigmoid(w^T x), fitted in Phase 7
+  l2_penalty: 1.0                      # [GAP] regularisation strength
+  max_iterations: 50                   # [GAP] IRLS iterations
+  min_train_cases: 200                 # [GAP] below this no model is fitted at all
+  calibration_buckets: 10              # [GAP] reliability buckets
+  calibration_ece_tolerance: 0.05      # [GAP] max expected calibration error allowed
+  calibration_min_cases: 500           # [GAP] below this the verdict is 'score', never a probability
+  similar_radius: 1.0                  # [GAP] Euclidean radius in standardised features
 
 gate:
   variance_ratio_q: [2, 4, 8]          # [GAP] q not specified in spec
