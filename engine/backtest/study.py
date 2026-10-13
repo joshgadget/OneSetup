@@ -95,6 +95,18 @@ def random_anchor_control(
                     funding_rate_per_day=funding_rate_per_day)
 
 
+def module_signals_and_trades(ctx: SeriesContext, name: str, *, costs=None,
+                             funding_rate_per_day=None):
+    """One module's candidates and their simulated trades. The scoring stage needs both."""
+    builder = CANDIDATE_BUILDERS.get(name)
+    if builder is None:
+        raise KeyError(f"unknown module {name!r}; known: {', '.join(MODULE_ORDER)}")
+    signals = list(builder(ctx))
+    trades = simulate(signals, ctx.candles, ctx.params, costs=costs,
+                      funding_rate_per_day=funding_rate_per_day)
+    return signals, trades
+
+
 def run_study(
     ctx: SeriesContext,
     *,
@@ -121,12 +133,8 @@ def run_study(
 
     reports: dict[str, ModuleReport] = {}
     for name in names:
-        builder = CANDIDATE_BUILDERS.get(name)
-        if builder is None:
-            raise KeyError(f"unknown module {name!r}; known: {', '.join(MODULE_ORDER)}")
-        signals = list(builder(ctx))
-        trades = simulate(signals, candles, params, costs=costs,
-                          funding_rate_per_day=funding_rate_per_day)
+        signals, trades = module_signals_and_trades(
+            ctx, name, costs=costs, funding_rate_per_day=funding_rate_per_day)
         metrics = compute_metrics(trades)
 
         test_trades = []

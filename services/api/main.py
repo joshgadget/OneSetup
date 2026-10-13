@@ -6,18 +6,46 @@ query so the site can drive a search box over hundreds of instruments.
 """
 from __future__ import annotations
 
+import asyncio
+import time
+
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
+from engine.backtest.candidates import SeriesContext
+from engine.backtest.costs import CostModel
 from engine.config import get_settings, load_params
 from engine.data.base import DataAdapterError
 from engine.data.discovery import discover_and_store
 from engine.data.integrity import find_gaps, is_stale
 from engine.data.registry import all_symbols
+from engine.foundation import compute_foundation
 from engine.models import SymbolInfo, Timeframe
+from services.api.analysis import ANALYSIS_VERSION, analyse_context, overlays_from_context
 from services.api.deps import adapter_for_symbol, find_symbol, get_ccxt, get_deriv, get_store
 
-app = FastAPI(title="Trading Analysis API", version="0.2.0")
+app = FastAPI(title="Trading Analysis API", version="0.3.0")
+
+_ANALYSIS_CACHE: dict[tuple, tuple[float, dict]] = {}
+_CACHE_TTL_SECONDS = 600.0
+
+
+def _cache_get(key: tuple) -> dict | None:
+    entry = _ANALYSIS_CACHE.get(key)
+    if entry is None:
+        return None
+    stored_at, value = entry
+    if time.time() - stored_at > _CACHE_TTL_SECONDS:
+        _ANALYSIS_CACHE.pop(key, None)
+        return None
+    return value
+
+
+def _cache_put(key: tuple, value: dict) -> None:
+    if len(_ANALYSIS_CACHE) > 64:
+        oldest = min(_ANALYSIS_CACHE, key=lambda k: _ANALYSIS_CACHE[k][0])
+        _ANALYSIS_CACHE.pop(oldest, None)
+    _ANALYSIS_CACHE[key] = (time.time(), value)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -32,6 +60,7 @@ def health() -> dict:
     settings = get_settings()
     return {
         "status": "ok",
+        "analysis_version": ANALYSIS_VERSION,
         "params_version": params.version,
         "params_sha256": params.file_hash,
         "providers": {
@@ -176,3 +205,118 @@ async def candles(
 @app.get("/timeframes")
 def timeframes() -> dict:
     return {"timeframes": [t.value for t in Timeframe]}
+
+
+async def _series(symbol: str, timeframe: str, bars: int):
+    """Closed candles for one symbol, from the store or freshly fetched.
+
+    Unfinished candles never leave this function: the spec's first rule is that no
+    detector and no client sees a candle that has not closed.
+    """
+    try:
+        tf = Timeframe.parse(timeframe)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    info = find_symbol(symbol)
+    if info is None:
+        raise HTTPException(status_code=404, detail=f"unknown symbol {symbol!r}; see GET /symbols")
+    store = get_store()
+    rows = store.get_candles(info.canonical_id, tf, limit=bars)
+    source = "store"
+    if not rows:
+        try:
+            rows = await adapter_for_symbol(info.canonical_id).get_candles(
+                info.canonical_id, tf, limit=bars)
+        except DataAdapterError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        if rows:
+            store.upsert_candles(rows)
+        source = info.venue.lower()
+    if not rows:
+        raise HTTPException(status_code=404,
+                            detail=f"no candles for {info.canonical_id} {tf.value}")
+    return info, tf, rows, source
+
+
+def _build_context(info, candles, tf):
+    store = get_store()
+    instrument = store.get_instrument(info.canonical_id)
+    params = load_params()
+    ctx = SeriesContext(candles=candles, params=params)
+    atr = ctx.foundation.atr_at(len(candles) - 1)
+    costs = CostModel.from_instrument(instrument, params, atr=atr)
+    return ctx, costs
+
+
+@app.get("/overlays/{symbol}")
+async def overlays(
+    symbol: str,
+    timeframe: str = "H1",
+    bars: int = Query(default=700, ge=50, le=5000),
+) -> dict:
+    """Detected levels, zones and events, ready to draw on the chart."""
+    info, tf, rows, source = await _series(symbol, timeframe, bars)
+    ctx, _costs = await asyncio.to_thread(_build_context, info, rows, tf)
+    body = await asyncio.to_thread(overlays_from_context, ctx)
+    body.update({
+        "display": info.display,
+        "market_class": info.market_class.value,
+        "venue": info.venue,
+        "source": source,
+    })
+    return body
+
+
+@app.get("/gate/{symbol}")
+async def gate(
+    symbol: str,
+    timeframe: str = "H1",
+    bars: int = Query(default=1200, ge=200, le=5000),
+    refresh: bool = False,
+) -> dict:
+    """The symbol gate on its own, before any setup is shown."""
+    analysis = await analysis_endpoint(symbol, timeframe=timeframe, bars=bars, refresh=refresh)
+    return {
+        "symbol": analysis["symbol"],
+        "display": analysis.get("display"),
+        "timeframe": analysis["timeframe"],
+        "as_of": analysis["as_of"],
+        "gate": analysis["gate"],
+    }
+
+
+@app.get("/analysis/{symbol}")
+async def analysis_endpoint(
+    symbol: str,
+    timeframe: str = "H1",
+    bars: int = Query(default=1200, ge=200, le=5000),
+    refresh: bool = False,
+) -> dict:
+    """One setup with its entry, stop, target, reasons and evidence, or "no setup"."""
+    info, tf, rows, source = await _series(symbol, timeframe, bars)
+    params = load_params()
+    key = (info.canonical_id, tf.value, rows[-1].open_time.isoformat(), len(rows),
+           params.file_hash)
+    if not refresh:
+        cached = _cache_get(key)
+        if cached is not None:
+            return {**cached, "cached": True}
+    ctx, costs = await asyncio.to_thread(_build_context, info, rows, tf)
+    body = await asyncio.to_thread(analyse_context, ctx, costs=costs)
+    gaps = find_gaps(rows, tf, info.market_class)
+    body.update({
+        "display": info.display,
+        "market_class": info.market_class.value,
+        "venue": info.venue,
+        "source": source,
+        "stale": is_stale(rows[-1], tf),
+        "unexpected_gaps": [str(g) for g in gaps if g.kind == "unexpected"],
+        "costs": {"spread_price": costs.spread_price,
+                  "slippage_price": costs.slippage_price,
+                  "commission_price": costs.commission_price,
+                  "notes": list(costs.notes)},
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "cached": False,
+    })
+    _cache_put(key, body)
+    return body
