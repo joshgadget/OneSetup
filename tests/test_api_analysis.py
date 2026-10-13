@@ -176,3 +176,23 @@ def test_analysis_is_cached_and_the_gate_endpoint_agrees(tmp_path, monkeypatch):
     assert second["as_of"] == first["as_of"] and second["status"] == first["status"]
     assert gate["gate"]["passed"] == first["gate"]["passed"]
     assert "setup" not in gate
+
+def test_analysis_says_plainly_when_there_is_too_little_history(tmp_path, monkeypatch):
+    client = make_client(tmp_path, monkeypatch)
+    seed_store(wave_candles(40))
+
+    response = client.get("/analysis/GBPUSD", params={"timeframe": "H1", "bars": 500})
+
+    assert response.status_code == 409
+    assert "at least 200" in response.json()["detail"]
+
+
+def test_symbol_ids_with_a_slash_are_routable(tmp_path, monkeypatch):
+    '''Crypto ids carry a slash (BTC/USD:BTC); the routes must accept them as one id.'''
+    client = make_client(tmp_path, monkeypatch)
+    seed_store(wave_candles(240, seed=9, symbol="BTC/USD:BTC"))
+
+    response = client.get("/overlays/BTC/USD:BTC", params={"timeframe": "H1", "bars": 300})
+
+    assert response.status_code == 200
+    assert response.json()["symbol"] == "BTC/USD:BTC"

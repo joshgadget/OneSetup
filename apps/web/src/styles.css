@@ -4,16 +4,57 @@ body { margin: 0; background: #0f1115; color: #d1d4dc; font-family: system-ui, -
 .page { max-width: 1200px; margin: 0 auto; padding: 16px; }
 header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
 h1 { font-size: 20px; margin: 0; }
+h2 { font-size: 17px; margin: 0; }
+h3 { font-size: 14px; margin: 18px 0 6px; color: #9aa0aa; text-transform: uppercase; letter-spacing: 0.04em; }
+h4 { font-size: 13px; margin: 12px 0 4px; color: #9aa0aa; }
 .controls { display: flex; gap: 8px; flex-wrap: wrap; }
-select { background: #1c1f26; color: #d1d4dc; border: 1px solid #2a2e39; border-radius: 6px; padding: 6px 8px; }
+select, input.search { background: #1c1f26; color: #d1d4dc; border: 1px solid #2a2e39; border-radius: 6px; padding: 6px 8px; }
+input.search { min-width: 190px; }
 .tabs { display: flex; gap: 4px; }
 .tabs button { background: #1c1f26; color: #d1d4dc; border: 1px solid #2a2e39; border-radius: 6px; padding: 6px 10px; cursor: pointer; }
 .tabs button.active { background: #2962ff; border-color: #2962ff; color: white; }
 .meta { display: flex; gap: 14px; flex-wrap: wrap; margin: 10px 0; font-size: 13px; color: #9aa0aa; }
+.meta.overlays { font-size: 12px; color: #6b7280; margin-top: -4px; }
 .warn { color: #ffb74d; }
 .error { background: #2a1416; border: 1px solid #5c2a2e; color: #ff8a80; padding: 10px; border-radius: 6px; margin: 10px 0; }
 .empty { border: 1px dashed #2a2e39; border-radius: 8px; padding: 40px; text-align: center; color: #6b7280; }
 .chart { width: 100%; border: 1px solid #1c1f26; border-radius: 8px; overflow: hidden; }
 footer { margin-top: 14px; font-size: 12px; color: #6b7280; }
 footer a { color: #90caf9; }
-@media (max-width: 640px) { .chart { height: 320px !important; } }
+
+.panel { margin-top: 18px; border: 1px solid #1c1f26; border-radius: 8px; padding: 14px; }
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.panel-head button { background: #1c1f26; color: #d1d4dc; border: 1px solid #2a2e39; border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+.panel-head button:disabled { opacity: 0.6; cursor: default; }
+.statement { background: #10202a; border: 1px solid #1d3b4a; border-radius: 6px; padding: 8px 10px; }
+.no-setup { background: #1a1c22; border: 1px solid #2a2e39; border-left: 3px solid #9aa0aa; border-radius: 6px; padding: 10px 12px; margin: 10px 0; }
+.setup-card { border: 1px solid #2a2e39; border-radius: 8px; padding: 12px; margin: 10px 0; }
+.setup-card.muted { opacity: 0.75; border-style: dashed; }
+.setup-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; font-size: 13px; }
+.side { font-weight: 700; border-radius: 4px; padding: 2px 8px; }
+.side.long { background: #14342b; color: #26a69a; }
+.side.short { background: #35191c; color: #ef5350; }
+.module { color: #9aa0aa; }
+.rr { color: #90caf9; }
+.levels-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 12px 0; }
+.levels-grid div { background: #14171d; border: 1px solid #1c1f26; border-radius: 6px; padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; }
+.levels-grid span { font-size: 12px; color: #9aa0aa; }
+.levels-grid strong { font-size: 18px; }
+ul.evidence { list-style: none; padding-left: 0; margin: 0; font-size: 13px; }
+ul.evidence li { padding: 3px 0; border-bottom: 1px solid #14171d; }
+ul.gate { font-size: 13px; color: #b0b6c0; padding-left: 18px; margin: 6px 0; }
+.notes { font-size: 12px; color: #6b7280; }
+.disclaimer { margin-top: 12px; }
+table.modules { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 6px; }
+table.modules th, table.modules td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #1c1f26; }
+table.modules th { color: #9aa0aa; font-weight: 500; }
+table.modules tr.ok td { color: #26a69a; }
+
+@media (max-width: 640px) {
+  .chart { height: 320px !important; }
+  .levels-grid { grid-template-columns: 1fr; }
+  header { flex-direction: column; align-items: stretch; }
+  .controls { flex-direction: column; }
+  input.search { min-width: 0; width: 100%; }
+  table.modules { display: block; overflow-x: auto; }
+}

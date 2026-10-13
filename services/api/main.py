@@ -28,6 +28,10 @@ app = FastAPI(title="Trading Analysis API", version="0.3.0")
 
 _ANALYSIS_CACHE: dict[tuple, tuple[float, dict]] = {}
 _CACHE_TTL_SECONDS = 600.0
+# A symbol with almost no stored history cannot be analysed; say so plainly instead of
+# failing somewhere deeper with an empty split or a divisor by zero.
+MIN_OVERLAY_CANDLES = 30
+MIN_ANALYSIS_CANDLES = 200
 
 
 def _cache_get(key: tuple) -> dict | None:
@@ -136,7 +140,7 @@ async def refresh_symbols() -> dict:
     return report
 
 
-@app.get("/instrument/{canonical_id}")
+@app.get("/instrument/{canonical_id:path}")
 async def instrument(canonical_id: str) -> dict:
     store = get_store()
     meta = store.get_instrument(canonical_id)
@@ -248,7 +252,7 @@ def _build_context(info, candles, tf):
     return ctx, costs
 
 
-@app.get("/overlays/{symbol}")
+@app.get("/overlays/{symbol:path}")
 async def overlays(
     symbol: str,
     timeframe: str = "H1",
@@ -256,6 +260,12 @@ async def overlays(
 ) -> dict:
     """Detected levels, zones and events, ready to draw on the chart."""
     info, tf, rows, source = await _series(symbol, timeframe, bars)
+    if len(rows) < MIN_OVERLAY_CANDLES:
+        raise HTTPException(
+            status_code=409,
+            detail=(f"only {len(rows)} closed {tf.value} candles stored for "
+                    f"{info.canonical_id}; the detectors need at least "
+                    f"{MIN_OVERLAY_CANDLES}. Load history for this symbol first."))
     ctx, _costs = await asyncio.to_thread(_build_context, info, rows, tf)
     body = await asyncio.to_thread(overlays_from_context, ctx)
     body.update({
@@ -267,7 +277,7 @@ async def overlays(
     return body
 
 
-@app.get("/gate/{symbol}")
+@app.get("/gate/{symbol:path}")
 async def gate(
     symbol: str,
     timeframe: str = "H1",
@@ -285,7 +295,7 @@ async def gate(
     }
 
 
-@app.get("/analysis/{symbol}")
+@app.get("/analysis/{symbol:path}")
 async def analysis_endpoint(
     symbol: str,
     timeframe: str = "H1",
@@ -294,6 +304,13 @@ async def analysis_endpoint(
 ) -> dict:
     """One setup with its entry, stop, target, reasons and evidence, or "no setup"."""
     info, tf, rows, source = await _series(symbol, timeframe, bars)
+    if len(rows) < MIN_ANALYSIS_CANDLES:
+        raise HTTPException(
+            status_code=409,
+            detail=(f"only {len(rows)} closed {tf.value} candles stored for "
+                    f"{info.canonical_id}; the analysis needs at least "
+                    f"{MIN_ANALYSIS_CANDLES} to split in time and test the gate. "
+                    "Load history for this symbol first."))
     params = load_params()
     key = (info.canonical_id, tf.value, rows[-1].open_time.isoformat(), len(rows),
            params.file_hash)

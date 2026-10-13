@@ -115,7 +115,11 @@ def test_calibration(fit: FitResult, test_trades: Sequence, params=None) -> dict
 
 
 def similarity_space(history: Sequence, params=None) -> dict:
-    """Means and scales of the similarity subset, measured on the history itself."""
+    """Means, scales and the standardised history matrix of the similarity subset.
+
+    The matrix is computed once and carried in the space, so scoring many candidates
+    against the same history does not recompute the history features per candidate.
+    """
     params = params or load_params()
     rows = _resolved(history)
     if not rows:
@@ -126,7 +130,22 @@ def similarity_space(history: Sequence, params=None) -> dict:
     scales = X.std(axis=0)
     scales[scales <= 1e-12] = 1.0
     return {"means": means, "scales": scales, "rows": rows,
-            "dimensions": len(SIMILARITY_FEATURES)}
+            "Z": (X - means) / scales, "dimensions": len(SIMILARITY_FEATURES)}
+
+
+def _similar_from_vector(x: np.ndarray, space: dict, params) -> dict:
+    """The neighbour count for one candidate feature vector inside a prepared space."""
+    radius = float(params.scoring.similar_radius) * float(np.sqrt(space["dimensions"]))
+    z = (np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0) - space["means"]) / space["scales"]
+    distances = np.sqrt(((space["Z"] - z[None, :]) ** 2).sum(axis=1))
+    mask = distances <= radius
+    n = int(mask.sum())
+    if n == 0:
+        return {"cases": 0, "hits": 0, "hit_rate": None, "interval": None, "radius": radius}
+    hits = [t for t, keep in zip(space["rows"], mask) if keep and t.outcome == "target"]
+    low, high = wilson_interval(len(hits), n, float(params.scoring.wilson_z))
+    return {"cases": n, "hits": len(hits), "hit_rate": len(hits) / n,
+            "interval": (low, high), "radius": radius}
 
 
 def similar_cases(
@@ -134,32 +153,23 @@ def similar_cases(
     history: Sequence,
     model: LogisticModel | None = None,
     params=None,
+    *,
+    space: dict | None = None,
 ) -> dict:
     """Past resolved cases inside scoring.similar_radius standard deviations per dimension.
 
     The radius is measured per dimension and scaled by sqrt(d), so "similar" means the
     same thing whatever the number of features is. It is a reading of "similar" that the
-    spec leaves open (DECISIONS.md D-015).
+    spec leaves open (DECISIONS.md D-015). Pass a prepared `space` when scoring many
+    candidates against the same history.
     """
     params = params or load_params()
     rows = _resolved(history)
     if not rows:
         return {"cases": 0, "hits": 0, "hit_rate": None, "interval": None, "radius": None}
-    space = similarity_space(rows, params)
-    radius = float(params.scoring.similar_radius) * float(np.sqrt(space["dimensions"]))
-    Z = (np.nan_to_num(feature_matrix([t.signal for t in rows], SIMILARITY_FEATURES, params)[0],
-                       nan=0.0) - space["means"]) / space["scales"]
-    x = np.nan_to_num(feature_matrix([candidate], SIMILARITY_FEATURES, params)[0][0], nan=0.0)
-    z = (x - space["means"]) / space["scales"]
-    distances = np.sqrt(((Z - z[None, :]) ** 2).sum(axis=1))
-    mask = distances <= radius
-    n = int(mask.sum())
-    if n == 0:
-        return {"cases": 0, "hits": 0, "hit_rate": None, "interval": None, "radius": radius}
-    hits = [t for t, keep in zip(rows, mask) if keep and t.outcome == "target"]
-    low, high = wilson_interval(len(hits), n, float(params.scoring.wilson_z))
-    return {"cases": n, "hits": len(hits), "hit_rate": len(hits) / n,
-            "interval": (low, high), "radius": radius}
+    space = space or similarity_space(rows, params)
+    x = feature_matrix([candidate], SIMILARITY_FEATURES, params)[0][0]
+    return _similar_from_vector(x, space, params)
 
 
 @dataclass
@@ -209,9 +219,17 @@ def rank_candidates(
     params = params or load_params()
     scored: list[RankedCandidate] = []
     probabilities = None
+    X_sim = None
+    space = None
     if fit.model is not None and candidates:
         X, _ = feature_matrix(list(candidates), FEATURE_NAMES, params)
         probabilities = fit.model.predict_proba(X)
+        X_sim, _ = feature_matrix(list(candidates), SIMILARITY_FEATURES, params)
+        if history:
+            try:
+                space = similarity_space(history, params)
+            except ValueError:
+                space = None
     for i, candidate in enumerate(candidates):
         risk = abs(candidate.entry - candidate.stop)
         if risk <= 0:
@@ -226,8 +244,9 @@ def rank_candidates(
         scored.append(RankedCandidate(
             signal=candidate, reward_risk=reward_risk, baseline_p0=p0,
             probability=probability, score=score, expected_value=ev,
-            similar=similar_cases(candidate, history, fit.model, params) if fit.model else
-            {"cases": 0, "hits": 0, "hit_rate": None, "interval": None},
+            similar=(_similar_from_vector(X_sim[i], space, params)
+                     if X_sim is not None and space is not None else
+                     {"cases": 0, "hits": 0, "hit_rate": None, "interval": None}),
             cost_r=cost_r,
         ))
     scored.sort(key=lambda row: (row.expected_value if row.expected_value is not None else -9e9),
