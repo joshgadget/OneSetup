@@ -198,6 +198,37 @@ Whichever he picks, the adapter interface (`get_candles`, `subscribe`,
 `get_instrument_metadata`) does not change; only `engine/data/fxcm.py` or a sibling
 module does.
 
+### D-006 update (Phase 8, 2026-10-13): the ForexConnect repository Josh linked
+
+Josh pointed to https://github.com/fxcm/ForexConnectAPI.git and asked us to work from it.
+Checked on 2026-10-13:
+
+- That repository is FXCM's **ForexConnect SDK distribution**, not a Python package. The
+  repo README says: "Forex Connect supports C++, C#, Java, VB, VBA, Windows, Linux and
+  smart phones. And it is free." Its top-level folders are the native SDK plus samples.
+- The **Python binding is separate**: the `forexconnect` package on PyPI. Checked
+  `pypi.org/pypi/forexconnect/json`: latest is 1.6.43 and the only Windows wheels are
+  cp35, cp36 and cp37 (win32 and win_amd64). There is **no cp311 wheel**, so
+  `pip install forexconnect` in this Python 3.11 venv fails: "
+  ERROR: No matching distribution found for forexconnect" (verified both with
+  `pip index versions` and `pip download --only-binary :all: --python-version 311`).
+- So the SDK cannot run inside the engine process as it stands.
+
+Options, in the order they now stand (the adapter interface does not change for any):
+
+| Option | Effort | Notes |
+| --- | --- | --- |
+| ForexConnect bridge on Python 3.7 x64 | Medium | the cp37 win_amd64 wheel exists. A small second process uses the SDK, pulls candles and writes them into the same SQLite store or POSTs them in. Keeps FXCM, adds an interpreter to install. |
+| FXCM FCLite REST/WebSocket | Medium | documented, no official Python client, 1-minute access token that must be refreshed on a loop. |
+| MT5 bridge (MQL5 EA) | Medium | broker-agnostic, works with whatever terminal Josh runs, and Phase 9 needs MQL5 anyway. |
+| OANDA v20 REST practice | Low | simplest read path, but a different vendor; practice host is live at `api-fxpractice.oanda.com`. |
+
+Until one is chosen and credentials exist, **forex and gold are served by the Deriv
+adapter** (`frx*` symbols, e.g. `frxGBPUSD`) and stored under the same canonical ids
+(GBPUSD, XAUUSD...). That is a real feed, not simulated data, but it is Deriv's own
+quotes with Deriv's own spreads, so it is not FXCM's book. Costs from it are unmodelled
+because Deriv metadata carries no typical spread (the analysis says so in its notes).
+
 ## D-007 Charting (Phase 0, 2026-10-12)
 
 Answered Josh's question "can we use TradingView?".
@@ -218,3 +249,184 @@ Answered Josh's question "can we use TradingView?".
   official repository before any public launch.
 - Added `?symbol=...&timeframe=...` URL parameters to the web app so a chart view is
   linkable and screenshottable. `apps/web/src/App.tsx`.
+
+## D-008 Support and resistance: what counts as a bounce (Phase 2, 2026-10-12)
+
+The only module with a published formal definition. Chung and Bellotti (2021), as the spec
+transcribes it: for support, x_t in [a, b] implies P(x_{t+d} > b) > P(x_{t+d} < a) for
+d = 1..omega; resistance mirrors it; discovery is Support = min X_t +/- gamma and
+Resistance = max X_t +/- gamma; strength is the Bayesian E[p] = (n+1)/(N+2) with
+Var[p] = (n+1)(N-n+1)/((N+3)(N+2)^2).
+
+**Reading chosen for an episode.** Every close inside the interval opens an episode; the
+episode resolves at the first close beyond an edge (near edge = bounce, far edge =
+penetration) or expires after omega candles still inside. Episodes still inside are
+excluded, as the paper's conditional probability excludes them.
+
+**Two readings were measured and rejected** (both on driftless synthetic random walks,
+which is the spec's acceptance test):
+- counting near-edge crossings and halving them, as the formula reads literally:
+  about 0.92, because a level anchored on a swing is crossed at its near edge far more
+  often than at its far edge;
+- counting only the first entry from the near side: about 0.59.
+
+**Measured acceptance result** (`tests/test_support_resistance.py`, 7 seeds):
+
+| anchors | bounce probability | episodes |
+| --- | --- | --- |
+| random (control) | 0.5204 | 4,045 |
+| confirmed pivots (as shipped) | 0.5473 | 11,988 |
+
+The 2.7-point gap is a selection effect, not a bug: a band anchored on a confirmed swing
+sits where price recently turned, so price inside it leaves through the near edge slightly
+more often than half the time even with no order flow at all. This is the noise floor, and
+it is why the symbol gate cannot treat "above 0.5" as evidence by itself.
+
+**Our additions, all named parameters:** gamma from a trailing window (m = 200) or
+0.25 x ATR; a level from every confirmed swing, with levels within gamma merged into a new
+interval while the originals are kept frozen as `merged` so a later merge cannot rewrite
+published evidence; age weighting w = exp(-lambda * candles) as a separate ranked estimate;
+break confirmation on a close beyond the edge by 0.1 x ATR; optional round-number grid
+(off until tested). The signal rule v1 (long after a close back above the support band,
+stop at a - 0.25 x ATR, target the lower bound of the nearest resistance band) is a
+convention of ours and is labelled as one in the code.
+
+## D-009 SMC readings (Phase 4, 2026-10-12)
+
+SMC has no published formal definition; the spec fixes one reading, and these three points
+were still open, so they are ours:
+
+- "known before t" for the latest swing high and low is read **strictly**:
+  `known_index <= t - 1`, so the breaking candle can never be its own reference;
+- "the swept low" in the entry-model stop rule is the **sweep candle's wick extreme**, the
+  deepest point of the sweep, which also sits at or below the pool level;
+- "formed in the MSS leg" means the zone is **confirmed at or after the MSS candle**.
+
+Defaults as parameters: BOS buffer 0.05 x ATR; displacement body 1.0 x ATR and close ratio
+0.75; standalone MSS does not require a liquidity grab (requiring one is a config flag);
+FVG minimum width 0.1 x ATR; FVG mitigation variant default `midpoint`, with `touch` and
+`full` kept as separate variants; order-block zone variant default `full_range`, body-only
+available. OHLC candles cannot show that institutions placed orders in any candle; these
+detectors find patterns with those names and nothing more.
+
+## D-010 CRT: which candle is the reference (Phase 4, 2026-10-12)
+
+The spec fixes the CRT reading and says to name the variant; the open points are ours:
+
+- the reference R is the **latest reference-timeframe candle that had fully closed before
+  the signal candle's close** (`interval_end(R) <= moment`), reference timeframe H4 by
+  default; with no reference series supplied the trading series is its own reference;
+- sweep = wick beyond H_R + eps with the close back inside; the reclaim may be the same
+  candle or the next (`sweep_reclaim_candles = 1`); the setup is known at the close of the
+  reclaiming candle;
+- entry variant `close_entry` (entering on that close). Waiting for a lower-timeframe MSS
+  is a separate variant and is not mixed in;
+- filters: skip ranges narrower than 0.5 x ATR; stop at the sweeping wick +/- 0.1 x ATR;
+  expiry 20 candles (our value; the spec leaves the horizon open).
+
+## D-011 MSNR readings (Phase 4, 2026-10-12)
+
+MSNR is a community method; the spec names the reading and these points were ours:
+
+- k = 1 close each side for an A level (a local peak of the close), so the level is known
+  one candle later;
+- zone gamma = max(3 ticks, 0.1 x ATR), close-based levels only; body-based zones are a
+  separate module and are not mixed in;
+- **the gap level price is the midpoint of the gap** (ours; the spec says "gap level"
+  without naming the price);
+- **the setup v1 target is the near edge of the nearest A-level zone above entry** (ours);
+- freshness F = exp(-0.7 N) is reported as a score, never as a probability;
+- touch, break and bounce are counted with the same rules as D-008, so each level carries
+  the same Bayesian bounce probability.
+
+## D-012 ICT anchors (Phase 4, 2026-10-12)
+
+ICT is a teaching framework, not a published model. The spec fixes the sequence; these
+anchors were ours:
+
+- session membership is decided by the **candle's open time** converted into the session
+  timezone; the shipped windows are `london 02:00-05:00`, `new_york 07:00-10:00` and
+  `silver_bullet 10:00-11:00` in **America/New_York**, and the config marks them "verify
+  with educator" **[OPEN: confirm with Josh's educator]**;
+- OTE anchors: the latest confirmed swing low before the MSS, and the highest high between
+  that low and the MSS candle;
+- Judas swing: first w candles of the session, known at the close of the candle that
+  reclaims the session open, never earlier;
+- power of three in order: accumulation (a range narrower than 1 x ATR), manipulation
+  (a Judas swing out of it), distribution (a displacement away from it); all three or
+  nothing;
+- "a prior sweep" in the Silver Bullet is an **opposite-side grab inside the configured
+  window** (ours; the spec does not define the sweep reference).
+
+## D-013 SLP readings (Phase 5, 2026-10-12)
+
+SLP has no published source; the spec says the definitions are its own, and these points
+were still open:
+
+- the equilibrium that gates the liquidity event and the POI discount rule comes from the
+  **lower-timeframe dealing range**;
+- a POI's formation window is `[grab.known_index, MSS candle]`, and its selection (t3)
+  happens at the MSS close;
+- the distance rule (d <= 3 ATR) is measured **at the selection candle from the nearest
+  edge** of the zone;
+- a candle that closes beyond the swept extreme is never itself the entry candle; entry
+  expiry is 20 candles;
+- POI overlap weights are **provisional unit weights** until a fit exists, so the POI score
+  is a rank and never a probability;
+- MSNR gap levels are not used as POIs in v1.
+
+## D-014 Backtest and study readings (Phase 6, 2026-10-13)
+
+Readings we had to fix to make a no-look-ahead backtest possible:
+
+- **moneyness is R only** in v1: no position size, no contract size, no account currency.
+  Win/loss, expectancy and drawdown are all in units of risk;
+- when one candle contains both the stop and the target the intrabar order is unknowable,
+  so the label **takes the stop**; claiming the target came first would be look-ahead the
+  data cannot support;
+- **liquidity has no entry rule in the spec** (it defines pools, grabs and target
+  selection). Two standalone readings were built and *both are reported*:
+  `liquidity` enters at the close of the reclaiming candle, `liquidity_retrace` waits for a
+  limit at the swept pool level. Reporting both, and counting them as two variants, is part
+  of the protocol so a failed idea cannot hide inside an average;
+- supply and demand *does* have an entry rule v1 in the spec and it is implemented here:
+  limit at the proximal line on the first return to a fresh zone, stop at the distal line
+  -/+ 0.1 x ATR, target the nearest opposing zone's proximal line;
+- an order is live from `known_index + 1` and never on the signal candle; a limit fills
+  only when a later candle's range touches it; entry expiry 20 candles; unresolved trades
+  exit at market after 40 candles;
+- costs: spread from provider metadata when it exists; commission and slippage default to
+  0 and are named parameters; **costs that cannot be resolved are reported as notes, never
+  invented** ("typical spread unknown for this instrument: spread cost is not modelled");
+- perpetual funding is subtracted when a funding rate is supplied, 3 intervals per day;
+- two baselines: p0 = the mean 1/(1+R) over the module's own setups, and a random-anchor
+  control with the same entries, stops, targets and expiry taken at uniform random candles
+  with a fixed seed, so a trending period cannot hand a module its edge for free;
+- below 30 resolved out-of-sample trades the study reports **no verdict**, never a lucky
+  one. Splits are train 0.5 / validation 0.2 / test 0.3 in time order, with a walk-forward
+  option.
+
+## D-015 Scoring and the show rule (Phase 7, 2026-10-13)
+
+- model: logistic `sigmoid(w^T x)` fitted by IRLS with L2 (l2_penalty 1.0, at most 50
+  iterations); missing features are filled with 0.0 after standardisation and **the count
+  of missing values travels with the model**, so the gap is visible;
+- **probability or score**: a number is called a probability only when the model was
+  fitted on past outcomes *and* the calibration check on the later period it never saw
+  passes: expected calibration error <= 0.05 and at least 500 validation cases. Otherwise
+  the interface calls it a **score** and the code refuses to rank by it;
+- the reliability buckets and the Brier score are reported either way; the test period is
+  read once and never used to refit;
+- "similar past cases" is measured on a 10-feature subset with an explicit radius:
+  `similar_radius` (1.0) x sqrt(d) in per-dimension standard deviations measured on the
+  history itself, with a Wilson interval on the hit rate of the matching cases;
+- candidates are ranked by **expected value** `EV = p * R - (1 - p) - cost_R`, never by raw
+  probability;
+- the show rule: gate passed AND model calibrated AND EV > 0 AND at least 100 similar past
+  cases AND the Wilson lower bound on those cases clears the trade's own p0. Anything else
+  returns "no setup" with the reason, which is a normal and common answer;
+- wording rule for every client: "score" unless calibrated, and the phrase "high
+  probability" is banned from the interface (a test asserts it never appears);
+- performance note (Phase 8): the similarity space is measured once per ranking pass. The
+  first version rebuilt the history features for every candidate, which made a live
+  analysis take about three minutes on 694 candles; it is now about 1 second.
