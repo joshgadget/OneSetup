@@ -13,7 +13,7 @@ import asyncio
 import json
 from pathlib import Path
 
-from engine.backtest.candidates import SeriesContext
+from engine.backtest.candidates import CANDIDATE_BUILDERS, SeriesContext
 from engine.backtest.costs import CostModel
 from engine.backtest.study import run_study
 from engine.config import get_settings, load_params
@@ -101,6 +101,8 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"{candles[0].symbol} {timeframe.value}  {len(candles)} candles  "
           f"{candles[0].open_time:%Y-%m-%d} to {candles[-1].open_time:%Y-%m-%d}")
+    print(f"variants tried: {len(reports)} of {len(CANDIDATE_BUILDERS)} registered "
+          f"(the spec says to count every variant tried)")
     print(f"cost model: spread={costs.spread_price} slippage={costs.slippage_price} "
           f"commission={costs.commission_price}")
     for note in costs.notes:
@@ -137,6 +139,7 @@ def main(argv: list[str] | None = None) -> int:
             "symbol": candles[0].symbol,
             "timeframe": timeframe.value,
             "candles": len(candles),
+            "variants_tried": len(reports),
             "start": candles[0].open_time.isoformat(),
             "end": candles[-1].open_time.isoformat(),
             "costs": {"spread_price": costs.spread_price,

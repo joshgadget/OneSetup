@@ -4,9 +4,15 @@ Two of these are readings of ours rather than published rules, and both are reco
 DECISIONS.md D-014:
 
 * liquidity has no entry rule in the spec. The spec defines pools, grabs and target
-  selection, and says the module feeds SMC and SLP. Standalone here: enter at the close
-  of the reclaiming candle, stop beyond the swept extreme minus/plus 0.1 x ATR, target
-  the nearest active opposing pool.
+  selection, and says the module feeds SMC and SLP. Two standalone readings are built
+  and both are reported, because the first one was invented first and the second one was
+  added after it failed; counting variants is part of the protocol:
+
+      liquidity            enter at the close of the reclaiming candle, stop beyond the
+                           swept extreme minus/plus 0.1 x ATR, target the nearest active
+                           opposing pool. This chases the reclaim bar.
+      liquidity_retrace    the same stop and target, but the entry is a limit at the
+                           swept pool level, so the trade waits for the retrace.
 * supply and demand does have an entry rule v1 in the spec: a limit at the proximal
   line on the first return to a fresh zone, stop at the distal line minus/plus
   0.1 x ATR, target the nearest opposing zone's proximal line. It is implemented here
@@ -73,8 +79,8 @@ def support_resistance_signals(ctx: SeriesContext) -> list:
     return list(signals)
 
 
-def liquidity_signals(ctx: SeriesContext) -> list:
-    """Our standalone reading: the grab itself is the entry (DECISIONS.md D-014)."""
+def _liquidity_candidates(ctx: SeriesContext, entry_mode: str) -> list:
+    """Shared body for the two standalone liquidity readings (DECISIONS.md D-014)."""
     buffer = float(ctx.params.liquidity.standalone_stop_buffer_atr)
     out = []
     for grab in ctx.grabs:
@@ -84,7 +90,12 @@ def liquidity_signals(ctx: SeriesContext) -> list:
         if not atr or atr <= 0:
             continue
         long = grab.side is Side.SELL
-        entry = candle.close
+        if entry_mode == "reclaim_close":
+            entry = candle.close
+        elif entry_mode == "pool_retrace":
+            entry = grab.pool_level
+        else:
+            raise ValueError(f"unknown liquidity entry mode {entry_mode!r}")
         stop = grab.extreme - buffer * atr if long else grab.extreme + buffer * atr
         pool = nearest_pool(ctx.pools, ctx.foundation, index, above=long)
         if pool is None:
@@ -111,9 +122,20 @@ def liquidity_signals(ctx: SeriesContext) -> list:
             ],
             features={"grab_depth_atr": grab.depth_atr, "grab_rejection": grab.rejection_ratio,
                       "pool_size": float(grab.pool_size)},
-            meta={"grab": grab.to_dict(), "pool": pool.to_dict()},
+            meta={"grab": grab.to_dict(), "pool": pool.to_dict(),
+                  "entry_mode": entry_mode},
         ))
     return out
+
+
+def liquidity_signals(ctx: SeriesContext) -> list:
+    """First standalone reading: enter at the close of the reclaiming candle."""
+    return _liquidity_candidates(ctx, "reclaim_close")
+
+
+def liquidity_retrace_signals(ctx: SeriesContext) -> list:
+    """Second standalone reading: wait for the retrace to the swept pool level."""
+    return _liquidity_candidates(ctx, "pool_retrace")
 
 
 def supply_demand_signals(ctx: SeriesContext) -> list:
@@ -208,6 +230,7 @@ def slp_signals(ctx: SeriesContext) -> list:
 CANDIDATE_BUILDERS = {
     "support_resistance": support_resistance_signals,
     "liquidity": liquidity_signals,
+    "liquidity_retrace": liquidity_retrace_signals,
     "supply_demand": supply_demand_signals,
     "smc": smc_signals,
     "ict": ict_signals,
