@@ -72,6 +72,14 @@ slp:
   poi_stop_buffer_atr: 0.10            # SLP: stop beyond farther of distal and swept extreme, -0.1 x ATR
   entry_expiry_candles: 20             # [GAP] entry expiry not specified
   cancel_buffer_atr: 0.05              # [GAP] close beyond swept extreme buffer
+  discount_reference: ltf_dealing_range     # [GAP] which range defines premium/discount
+  poi_distance_reference: selection_candle  # [GAP] distance measured at the MSS candle
+  poi_weights:                         # [GAP] fitted on training data in Phase 7;
+    fvg: 0.25                          # until then these are provisional unit weights
+    order_block: 0.25                  # and the POI score is a rank, never a probability
+    supply_demand: 0.25
+    support_resistance: 0.25
+    msnr: 0.25
 
 smc:
   bos_buffer_atr: 0.05                 # BOS: eps = 0.05 x ATR
