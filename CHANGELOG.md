@@ -10,7 +10,7 @@ simulated and presented as a market result.
 - `Dockerfile` (python:3.11-slim) and `.dockerignore` for the API service, plus a
   `Procfile` and a `render.yaml` blueprint (web service, `/health` check, 1 GB disk
   at `/var/data`, `DATA_DIR` and `DB_PATH` pointed at it).
-- `apps/web/vercel.json` (Vite build, SPA rewrites) and `apps/web/.env.example`
+- `apps/web/vercel.json` (Vite build, output directory) and `apps/web/.env.example`
   documenting `VITE_API_BASE`, the only thing the site needs to find the API.
 - `DEPLOY.md`: the step-by-step path for both halves, the two environment values
   that must agree (`ALLOWED_ORIGINS` on the API, `VITE_API_BASE` on the site),
