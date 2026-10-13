@@ -42,6 +42,16 @@ class Settings(BaseSettings):
     db_path: str = "data/trading.sqlite3"
     params_path: str = str(DEFAULT_PARAMS_PATH)
 
+    # Browser origins allowed to call the API, comma separated. The deployed site sets
+    # this to its own domain; "*" allows any origin (fine while nothing is authenticated,
+    # but set the real domain before this stops being a demo).
+    allowed_origins: str = ""
+
+    @property
+    def cors_origins(self) -> list[str]:
+        origins = [part.strip() for part in self.allowed_origins.split(",") if part.strip()]
+        return origins or ["http://localhost:5173", "http://127.0.0.1:5173"]
+
 
 class Params(Mapping):
     """Immutable-ish nested mapping with attribute access for reading parameters."""

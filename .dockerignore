@@ -1,0 +1,11 @@
+.git/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.env
+*.log
+/data/
+_spec_v2.txt
+apps/web/node_modules/
+apps/web/dist/

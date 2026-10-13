@@ -78,9 +78,10 @@ def _cache_put(key: tuple, value: dict) -> None:
         oldest = min(_ANALYSIS_CACHE, key=lambda k: _ANALYSIS_CACHE[k][0])
         _ANALYSIS_CACHE.pop(oldest, None)
     _ANALYSIS_CACHE[key] = (time.time(), value)
+CORS_ORIGINS = get_settings().cors_origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )

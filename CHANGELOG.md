@@ -4,6 +4,32 @@ Phases 0 to 8 are built. Phase 9 (the MT5 client) is not started. Every result b
 comes from real provider data or from hand-built fixtures used as controls; nothing is
 simulated and presented as a market result.
 
+## Phase 11 - Deployment packaging (2026-10-13)
+
+### Added
+- `Dockerfile` (python:3.11-slim) and `.dockerignore` for the API service, plus a
+  `Procfile` and a `render.yaml` blueprint (web service, `/health` check, 1 GB disk
+  at `/var/data`, `DATA_DIR` and `DB_PATH` pointed at it).
+- `apps/web/vercel.json` (Vite build, SPA rewrites) and `apps/web/.env.example`
+  documenting `VITE_API_BASE`, the only thing the site needs to find the API.
+- `DEPLOY.md`: the step-by-step path for both halves, the two environment values
+  that must agree (`ALLOWED_ORIGINS` on the API, `VITE_API_BASE` on the site),
+  the free-tier limits that matter (Render free disk is ephemeral, Vercel Hobby is
+  non-commercial), and the seeding step after a first boot.
+- API CORS origins now come from configuration (`ALLOWED_ORIGINS`, comma separated)
+  instead of a hard-coded localhost list, so the deployed site is allowed and
+  nothing else is.
+- `tests/test_deploy_config.py`: the Dockerfile, blueprint, Vercel config and CORS
+  wiring are checked against the repo so a deploy cannot silently drift.
+
+### Notes
+- The API is a long-running process with a disk, not a serverless function: the
+  candle store is SQLite, the providers are websocket/REST clients held open, and
+  Deriv history backfills can exceed a serverless timeout. It deploys to Render;
+  the website deploys to Vercel as static files.
+- No secret is baked into any image or config in this repo; keys stay in the
+  platform's environment settings.
+
 ## Phase 10 - TradingView-style workspace (2026-10-13)
 
 ### Added

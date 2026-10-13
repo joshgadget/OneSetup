@@ -1,0 +1,21 @@
+# Render blueprint for the analysis API. The website goes to Vercel, see DEPLOY.md.
+services:
+  - type: web
+    name: onesetup-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    plan: starter          # a persistent disk is not available on the free plan
+    envVars:
+      - key: DB_PATH
+        value: /data/trading.sqlite3
+      - key: ALLOWED_ORIGINS
+        sync: false        # set to the Vercel domain in the dashboard
+      - key: DERIV_APP_ID
+        sync: false
+      - key: CMC_API_KEY
+        sync: false
+    disk:
+      name: onesetup-data
+      mountPath: /data
+      sizeGB: 1

@@ -454,3 +454,23 @@ ours:
 The ATR pane draws the engine's own Wilder ATR(14) - the same series every detector uses -
 served by `/overlays`, never recomputed in the browser. The TradingView-style toggles only
 hide or show what the detectors found; nothing in the interface computes a level.
+
+## D-017 Where each half is deployed (2026-10-13)
+
+- **Website: Vercel, as a static Vite build.** Root directory `apps/web`; the only
+  build-time input is `VITE_API_BASE`. Attribution wording for TradingView
+  Lightweight Charts is already in the page footer and must stay.
+- **API: Render, from the repo's `Dockerfile`, via `render.yaml`.** Not Vercel
+  serverless: the store is SQLite on disk, provider clients are held open between
+  requests, and cold Deriv history backfills exceed function timeouts. The
+  blueprint asks for a 1 GB disk at `/var/data`; on Render's free tier disks are
+  not available and the filesystem is ephemeral, so the store must be re-seeded
+  after a restart there. That is acceptable for a demonstration, not for daily
+  use - a paid instance (or any VPS with a disk) removes it.
+- **CORS:** the API allows exactly the origins listed in `ALLOWED_ORIGINS`; after
+  the first Vercel deploy, that variable must be set to the Vercel domain and the
+  API redeployed, or the browser will block every call while the API itself looks
+  healthy.
+- **Secrets:** none are stored in the repo or in either platform's build config;
+  `DERIV_APP_ID`, `CMC_API_KEY` (optional; quotes and listings only) and
+  `ALLOWED_ORIGINS` are set in the Render dashboard.
