@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,7 +26,17 @@ from engine.models import SymbolInfo, Timeframe
 from services.api.analysis import ANALYSIS_VERSION, analyse_context, overlays_from_context
 from services.api.deps import adapter_for_symbol, find_symbol, get_ccxt, get_deriv, get_store
 
-app = FastAPI(title="Trading Analysis API", version="0.3.0")
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Close the provider clients on shutdown so no session is left open."""
+    yield
+    try:
+        await get_ccxt().aclose()
+    except Exception:  # pragma: no cover - best effort at shutdown
+        pass
+
+
+app = FastAPI(title="Trading Analysis API", version="0.4.0", lifespan=lifespan)
 
 _ANALYSIS_CACHE: dict[tuple, tuple[float, dict]] = {}
 _CACHE_TTL_SECONDS = 600.0
