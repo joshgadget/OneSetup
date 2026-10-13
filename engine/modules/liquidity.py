@@ -54,6 +54,7 @@ class Pool:
     swept_index: int | None = None
     invalidated_index: int | None = None
     last_touch_index: int | None = None
+    broken_index: int | None = None       # first candle that ended the active state
 
     @property
     def size(self) -> int:
@@ -70,6 +71,7 @@ class Pool:
             "swept_index": self.swept_index,
             "inv_marker": self.invalidated_index,
             "last_touch_index": self.last_touch_index,
+            "broken_index": self.broken_index,
         }
 
 
@@ -86,6 +88,7 @@ class Grab:
     rejection_ratio: float
     pool_size: int
     extreme: float               # the wick that swept
+    pool_active: bool = True     # the pool had not already been broken at the pierce
 
     def to_dict(self) -> dict:
         return {
@@ -98,6 +101,7 @@ class Grab:
             "rejection_ratio": self.rejection_ratio,
             "pool_size": self.pool_size,
             "extreme": self.extreme,
+            "pool_active": self.pool_active,
         }
 
 
@@ -167,15 +171,23 @@ def build_pools(
                     pool.last_touch_index = t
                 if candle.high > pool.level + eps and candle.close < pool.level:
                     pool.state, pool.swept_index = "swept", t
+                    if pool.broken_index is None:
+                        pool.broken_index = t
                 elif candle.close > pool.level + breakout_buffer * atr:
                     pool.state, pool.invalidated_index = "invalidated", t
+                    if pool.broken_index is None:
+                        pool.broken_index = t
             else:
                 if candle.low < pool.level:
                     pool.last_touch_index = t
                 if candle.low < pool.level - eps and candle.close > pool.level:
                     pool.state, pool.swept_index = "swept", t
+                    if pool.broken_index is None:
+                        pool.broken_index = t
                 elif candle.close < pool.level - breakout_buffer * atr:
                     pool.state, pool.invalidated_index = "invalidated", t
+                    if pool.broken_index is None:
+                        pool.broken_index = t
     return pools
 
 
@@ -222,9 +234,11 @@ def detect_grabs(
                 one_candle = pierced and candle.close > pool.level
                 depth = (pool.level - candle.low) / atr
                 rejection = (candle.close - pool.level) / max(candle.high - candle.low, 1e-12)
+            active = pool.broken_index is None or pool.broken_index >= i
             if one_candle:
                 grabs.append(Grab(pool.side, pool.level, i, i, "one_candle", depth, rejection,
-                                  pool.size, candle.high if pool.side is Side.BUY else candle.low))
+                                  pool.size, candle.high if pool.side is Side.BUY else candle.low,
+                                  active))
                 i += 1
                 continue
             if pierced:
@@ -235,7 +249,8 @@ def detect_grabs(
                     if reclaimed:
                         grabs.append(Grab(pool.side, pool.level, i, j, "reclaim_within_r", depth,
                                           rejection, pool.size,
-                                          candle.high if pool.side is Side.BUY else candle.low))
+                                          candle.high if pool.side is Side.BUY else candle.low,
+                                          active))
                         i = j + 1
                         break
                 else:
@@ -257,14 +272,19 @@ def dealing_range(foundation: Foundation, index: int) -> tuple[float, float] | N
     return low.price, high.price
 
 
-def pool_position(pool: Pool, rng: tuple[float, float] | None) -> str:
-    """external | internal | unknown, against the dealing range."""
+def position_of(level: float, rng: tuple[float, float] | None) -> str:
+    """external | internal | unknown for a price against the dealing range."""
     if rng is None:
         return "unknown"
     low, high = rng
-    if pool.level >= high or pool.level <= low:
+    if level >= high or level <= low:
         return "external"
     return "internal"
+
+
+def pool_position(pool: Pool, rng: tuple[float, float] | None) -> str:
+    """external | internal | unknown, against the dealing range."""
+    return position_of(pool.level, rng)
 
 
 def active_pools(pools: Sequence[Pool], index: int, *, include_swept: bool = False) -> list[Pool]:

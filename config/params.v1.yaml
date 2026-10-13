@@ -78,9 +78,12 @@ smc:
   displacement_body_atr: 1.0           # Displacement: alpha = 1.0 starting value
   displacement_close_ratio: 0.75       # Displacement: q = 0.75 starting value
   mss_require_liquidity_grab: false    # [GAP] standalone MSS default without grab condition
+  mss_grab_window_candles: 10          # MSS: grab in the previous r candles, r = 10
   fvg_min_width_atr: 0.10              # FVG: drop gaps below 0.1 x ATR
   fvg_mitigation: midpoint             # FVG: touch | midpoint | full; chosen default
   entry_model_expiry_candles: 20       # [GAP] entry model expiry
+  entry_model_mss_window_candles: 10   # [GAP] window for the grab -> MSS step
+  entry_model_stop_buffer_atr: 0.10    # Entry model v1: stop below the swept low minus 0.1 x ATR
 
 ict:
   range_timeframe: H4                  # Dealing range: latest confirmed swing high/low
@@ -94,12 +97,17 @@ ict:
   judas_buffer_atr: 0.05               # [GAP] epsilon
   po3_accumulation_candles: 4          # [GAP] accumulation window shape
   po3_accumulation_max_width_atr: 1.0  # Power of three: total width below 1 x ATR
+  mss_window_candles: 10               # ICT: lower-timeframe MSS within r = 10 of the grab
+  entry_model_expiry_candles: 20       # [GAP] entry expiry not stated for the ICT model
+  cancellation: close_beyond_swept_extreme  # ICT entry model: example cancellation rule
+  sweep_window_candles: 10             # [GAP] window for "a prior sweep" in Silver Bullet
 
 crt:
   reference_timeframe: H4              # CRT: 4 hour or daily reference
   sweep_mode: wick_close_back_inside   # CRT: wick-only or close-based; pick one
   sweep_reclaim_candles: 1             # CRT: sweep and reclaim same candle, or up to n = 1
   buffer_atr: 0.05                     # CRT: eps = 0.05 x ATR
+  stop_buffer_atr: 0.10                # CRT: SL = H_t + 0.1 x ATR
   expiry_candles: 20                   # [GAP] cancellation horizon
   min_range_width_atr: 0.5             # CRT filters: W_R >= 0.5 x ATR
 
