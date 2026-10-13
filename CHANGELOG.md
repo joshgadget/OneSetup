@@ -21,6 +21,9 @@ simulated and presented as a market result.
   nothing else is.
 - `tests/test_deploy_config.py`: the Dockerfile, blueprint, Vercel config and CORS
   wiring are checked against the repo so a deploy cannot silently drift.
+- `.gitattributes`: line endings are pinned to LF for the Dockerfile, the Procfile
+  and every shell/python/yaml file, because the project is authored on Windows and a
+  carriage return in a Linux-run command is a silent deploy failure.
 
 ### Notes
 - The API is a long-running process with a disk, not a serverless function: the

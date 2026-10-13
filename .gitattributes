@@ -1,0 +1,12 @@
+# Normalise text to LF in the repository; the project is authored on Windows.
+* text=auto
+
+# These files are executed or parsed on Linux (Docker, Render, shells): a CRLF
+# here turns into a stray carriage return in a command and breaks the deploy.
+Dockerfile text eol=lf
+Procfile text eol=lf
+.gitignore text eol=lf
+*.sh text eol=lf
+*.py text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
