@@ -1,0 +1,2 @@
+# OneSetup
+trading analysis 
