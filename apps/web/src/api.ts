@@ -3,6 +3,9 @@ export interface SymbolInfo {
   display: string;
   market_class: string;
   venue: string;
+  candles?: number;
+  has_data?: boolean;
+  last_candle?: string | null;
 }
 
 export interface Candle {
@@ -19,6 +22,9 @@ export interface CandlesResponse {
   symbol: string;
   timeframe: string;
   count: number;
+  source: string;
+  refreshed: boolean;
+  refresh_skipped: string | null;
   stale: boolean;
   unexpected_gaps: string[];
   candles: Candle[];
@@ -146,6 +152,8 @@ export interface OverlaysResponse {
   display?: string;
   timeframe: string;
   as_of: string;
+  atr_period: number;
+  atr: Array<{ time: string; value: number }>;
   market_class?: string;
   venue?: string;
   source?: string;
@@ -288,13 +296,25 @@ export function getSymbols(): Promise<SymbolInfo[]> {
   return getJson<{ symbols: SymbolInfo[] }>("/symbols").then((body) => body.symbols);
 }
 
-export function getCandles(symbol: string, timeframe: string, limit = 500): Promise<CandlesResponse> {
-  const q = `symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}&limit=${limit}`;
+export function getCandles(
+  symbol: string,
+  timeframe: string,
+  limit = 500,
+  refresh = false
+): Promise<CandlesResponse> {
+  const q = `symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}&limit=${limit}${
+    refresh ? "&refresh=true" : ""
+  }`;
   return getJson<CandlesResponse>(`/candles?${q}`);
 }
 
-export function getOverlays(symbol: string, timeframe: string, bars = 700): Promise<OverlaysResponse> {
-  const q = `timeframe=${timeframe}&bars=${bars}`;
+export function getOverlays(
+  symbol: string,
+  timeframe: string,
+  bars = 700,
+  refresh = false
+): Promise<OverlaysResponse> {
+  const q = `timeframe=${timeframe}&bars=${bars}${refresh ? "&refresh=true" : ""}`;
   return getJson<OverlaysResponse>(`/overlays/${encodeURIComponent(symbol)}?${q}`);
 }
 

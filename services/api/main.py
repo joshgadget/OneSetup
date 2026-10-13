@@ -19,6 +19,7 @@ from engine.data.base import DataAdapterError
 from engine.data.discovery import discover_and_store
 from engine.data.integrity import find_gaps, is_stale
 from engine.data.registry import all_symbols
+from engine.data.resample import can_resample, resample_candles
 from engine.foundation import compute_foundation
 from engine.models import SymbolInfo, Timeframe
 from services.api.analysis import ANALYSIS_VERSION, analyse_context, overlays_from_context
@@ -32,6 +33,22 @@ _CACHE_TTL_SECONDS = 600.0
 # failing somewhere deeper with an empty split or a divisor by zero.
 MIN_OVERLAY_CANDLES = 30
 MIN_ANALYSIS_CANDLES = 200
+# Providers are polled by the browser, so the same symbol and timeframe can only
+# reach a provider once inside this window; inside it the store answers.
+PROVIDER_MIN_INTERVAL_SECONDS = 20.0
+
+# Markets that do not trade every day: a weekly candle is complete at five daily
+# members, not seven (DECISIONS.md D-016). Everything else trades continuously.
+SESSION_MARKETS = {"forex", "gold", "commodity", "index"}
+
+
+def expected_members_for(market_class, tf: Timeframe) -> int | None:
+    """How many base candles a complete bucket needs, when the venue has no such timeframe."""
+    if tf is not Timeframe.W1:
+        return None
+    return 5 if market_class.value in SESSION_MARKETS else 7
+
+_LAST_PROVIDER_CALL: dict[tuple[str, str], float] = {}
 
 
 def _cache_get(key: tuple) -> dict | None:
@@ -160,6 +177,7 @@ async def candles(
     timeframe: str = "H1",
     limit: int = Query(default=500, ge=1, le=10000),
     store_only: bool = False,
+    refresh: bool = False,
 ) -> dict:
     try:
         tf = Timeframe.parse(timeframe)
@@ -172,15 +190,29 @@ async def candles(
     store = get_store()
     rows = store.get_candles(canonical, tf, limit=limit)
     source = "store"
-    if not rows and not store_only:
-        try:
-            fetched = await adapter_for_symbol(canonical).get_candles(canonical, tf, limit=limit)
-        except DataAdapterError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
-        if fetched:
-            store.upsert_candles(fetched)
-        rows = fetched
-        source = info.venue.lower()
+    refreshed = False
+    refresh_skipped: str | None = None
+    if store_only:
+        pass
+    elif not rows or refresh:
+        if rows and refresh and _provider_throttled(canonical, tf):
+            refresh_skipped = (f"provider calls for this symbol and timeframe are limited to "
+                               f"one every {int(PROVIDER_MIN_INTERVAL_SECONDS)}s; the store "
+                               f"answered instead")
+        else:
+            try:
+                fetched, fetched_source = await _fetch_candles(info, tf, limit)
+            except DataAdapterError as exc:
+                if not rows:
+                    raise HTTPException(status_code=502, detail=str(exc)) from exc
+                refresh_skipped = str(exc)
+            else:
+                _provider_called(canonical, tf)
+                if fetched:
+                    store.upsert_candles(fetched)
+                    rows = store.get_candles(canonical, tf, limit=limit)
+                    source = fetched_source
+                    refreshed = True
     gaps = find_gaps(rows, tf, info.market_class) if rows else []
     stale = is_stale(rows[-1], tf) if rows else True
     return {
@@ -191,6 +223,8 @@ async def candles(
         "timeframe": tf.value,
         "count": len(rows),
         "source": source,
+        "refreshed": refreshed,
+        "refresh_skipped": refresh_skipped,
         "stale": stale,
         "unexpected_gaps": [str(g) for g in gaps if g.kind == "unexpected"],
         "expected_gaps": [str(g) for g in gaps if g.kind != "unexpected"],
@@ -211,7 +245,52 @@ def timeframes() -> dict:
     return {"timeframes": [t.value for t in Timeframe]}
 
 
-async def _series(symbol: str, timeframe: str, bars: int):
+def _provider_throttled(canonical: str, tf: Timeframe) -> bool:
+    last = _LAST_PROVIDER_CALL.get((canonical, tf.value))
+    return last is not None and (time.time() - last) < PROVIDER_MIN_INTERVAL_SECONDS
+
+
+def _provider_called(canonical: str, tf: Timeframe) -> None:
+    _LAST_PROVIDER_CALL[(canonical, tf.value)] = time.time()
+
+
+async def _fetch_candles(info, tf: Timeframe, bars: int) -> tuple[list[Candle], str]:
+    """Candles from the provider, with a resample fallback for unsupported timeframes.
+
+    Deriv publishes no weekly candles, so a timeframe a venue does not serve falls back
+    to the largest stored or fetchable base timeframe that divides it. The resampler
+    drops incomplete buckets rather than guessing, and every returned candle keeps the
+    closed flag, so a weekly candle appears only once its week has actually ended.
+    """
+    adapter = adapter_for_symbol(info.canonical_id)
+    try:
+        fetched = await adapter.get_candles(info.canonical_id, tf, limit=bars)
+        return fetched, info.venue.lower()
+    except DataAdapterError as first_error:
+        expected = expected_members_for(info.market_class, tf)
+        for base_tf in (Timeframe.D1, Timeframe.H4, Timeframe.H1):
+            if not can_resample(base_tf, tf):
+                continue
+            store = get_store()
+            base = store.get_candles(info.canonical_id, base_tf, limit=max(bars * 8, 500))
+            if not base:
+                try:
+                    base = await adapter.get_candles(info.canonical_id, base_tf,
+                                                    limit=max(bars * 8, 500))
+                except DataAdapterError:
+                    continue
+                if base:
+                    store.upsert_candles(base)
+            derived = (resample_candles(base, base_tf, tf, expected_members=expected)
+                       if base else [])
+            if derived:
+                return derived, f"{info.venue.lower()}+resample"
+        raise DataAdapterError(
+            f"{info.venue} does not serve {tf.value} for {info.canonical_id} and it cannot "
+            f"be resampled from stored candles ({first_error})") from first_error
+
+
+async def _series(symbol: str, timeframe: str, bars: int, *, refresh: bool = False):
     """Closed candles for one symbol, from the store or freshly fetched.
 
     Unfinished candles never leave this function: the spec's first rule is that no
@@ -225,17 +304,22 @@ async def _series(symbol: str, timeframe: str, bars: int):
     if info is None:
         raise HTTPException(status_code=404, detail=f"unknown symbol {symbol!r}; see GET /symbols")
     store = get_store()
-    rows = store.get_candles(info.canonical_id, tf, limit=bars)
+    canonical = info.canonical_id
+    rows = store.get_candles(canonical, tf, limit=bars)
     source = "store"
-    if not rows:
+    throttled = _provider_throttled(canonical, tf)
+    if (not rows or refresh) and not throttled:
         try:
-            rows = await adapter_for_symbol(info.canonical_id).get_candles(
-                info.canonical_id, tf, limit=bars)
+            fetched, fetched_source = await _fetch_candles(info, tf, bars)
         except DataAdapterError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
-        if rows:
-            store.upsert_candles(rows)
-        source = info.venue.lower()
+            if not rows:
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
+        else:
+            _provider_called(canonical, tf)
+            if fetched:
+                store.upsert_candles(fetched)
+                rows = store.get_candles(canonical, tf, limit=bars)
+                source = fetched_source
     if not rows:
         raise HTTPException(status_code=404,
                             detail=f"no candles for {info.canonical_id} {tf.value}")
@@ -257,9 +341,10 @@ async def overlays(
     symbol: str,
     timeframe: str = "H1",
     bars: int = Query(default=700, ge=50, le=5000),
+    refresh: bool = False,
 ) -> dict:
     """Detected levels, zones and events, ready to draw on the chart."""
-    info, tf, rows, source = await _series(symbol, timeframe, bars)
+    info, tf, rows, source = await _series(symbol, timeframe, bars, refresh=refresh)
     if len(rows) < MIN_OVERLAY_CANDLES:
         raise HTTPException(
             status_code=409,

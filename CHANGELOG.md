@@ -4,6 +4,39 @@ Phases 0 to 8 are built. Phase 9 (the MT5 client) is not started. Every result b
 comes from real provider data or from hand-built fixtures used as controls; nothing is
 simulated and presented as a market result.
 
+## Phase 10 - TradingView-style workspace (2026-10-13)
+
+### Added
+- Watchlist sidebar: every stored instrument (433 today) grouped by market class - forex,
+  gold, commodities, indices, crypto perpetuals, crypto futures, crypto spot, synthetic
+  indices - with a filter box, favourites, and a dot showing which symbols already have
+  candles stored.
+- Chart: volume pane and an ATR(14) pane drawn from the engine's own Wilder ATR, 20-second
+  live polling with a paused/live toggle, per-category overlay toggles (levels, zones,
+  pools, FVGs, order blocks, MSS and structure events, MSNR, CRT) each showing how many
+  were found, full-screen mode, and zoom that survives a live update (only a symbol or
+  timeframe change re-fits the chart).
+- Timeframes M1, M5, M15, M30, H1, H4, D1 and W1.
+- `GET /candles?refresh=true` and `GET /overlays?refresh=true`: the server polls the venue
+  at most once per symbol and timeframe every 20 seconds, answers from the store inside
+  that window and says so (`refresh_skipped`), so an open page cannot hammer a provider.
+- Weekly candles for venues that do not publish them, resampled from daily candles with
+  the session-market rule (five members for a trading week, seven for a 24/7 market;
+  holiday weeks are dropped, not filled in).
+- The site remembers the symbol, timeframe, live state, overlay toggles, favourites and
+  volume/ATR choices in the browser, and keeps `?symbol=&timeframe=` linkable.
+
+### Verified with real data (2026-10-13)
+- GBPUSD W1: 49 weekly candles (Oct 2025 to Oct 2026) via `deriv+resample`; XAUUSD W1: 48.
+- BTC/USD:BTC W1: 17 candles, native weekly from Deribit.
+- GBPUSD M15: 188 closed candles from Deriv; ATR feed 587 points for 600 H1 candles.
+- Refresh polling: first call refreshed from the provider, the second inside 20 seconds was
+  throttled and answered from the store, as designed.
+
+### Tests
+`pytest`: **161 passed** (157 + 4 new: refresh and throttle, weekly resample for a 24/7
+market, weekly resample for a five-day market, the ATR feed matching the engine).
+
 ## Phase 8 - API and website (2026-10-13)
 
 ### Added

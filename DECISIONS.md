@@ -430,3 +430,27 @@ Readings we had to fix to make a no-look-ahead backtest possible:
 - performance note (Phase 8): the similarity space is measured once per ranking pass. The
   first version rebuilt the history features for every candidate, which made a live
   analysis take about three minutes on 694 candles; it is now about 1 second.
+
+## D-016 Live workspace: polling, weekly candles and the ATR feed (2026-10-13)
+
+Two rules the TradingView-style workspace needed, recorded because both are readings of
+ours:
+
+- **A weekly candle on a session market is complete at five daily members.** Deriv
+  publishes no weekly timeframe, so W1 is resampled from D1 when the venue has none. The
+  resampler (`engine/data/resample.py`) still refuses to guess: a bucket is aggregated only
+  when it has exactly the expected number of members - 5 for forex, gold, commodities and
+  indices, 7 for crypto and synthetic indices (which trade every day). A holiday week has
+  four members and is therefore **dropped, not filled in**. Venues that publish weekly
+  candles natively (Deribit over CCXT) are used as they are. Verified live: GBPUSD 49 weekly
+  candles and XAUUSD 48 from `deriv+resample`, BTC 17 natively from Deribit.
+- **The browser polls, the server throttles.** The site refreshes the chart every 20
+  seconds. The API allows at most **one provider call per symbol and timeframe every 20
+  seconds**; inside that window it answers from the store and tells the client the poll was
+  throttled (`refresh_skipped`), so a page left open cannot hammer a venue or burn a rate
+  limit. The full analysis (the expensive call) stays cached for 10 minutes and is only
+  re-run when the user asks.
+
+The ATR pane draws the engine's own Wilder ATR(14) - the same series every detector uses -
+served by `/overlays`, never recomputed in the browser. The TradingView-style toggles only
+hide or show what the detectors found; nothing in the interface computes a level.

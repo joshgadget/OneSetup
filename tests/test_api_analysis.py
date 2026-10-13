@@ -41,8 +41,10 @@ CARD_FIELDS = {
 def _empty_analysis_cache():
     from services.api import main as api_main
     api_main._ANALYSIS_CACHE.clear()
+    api_main._LAST_PROVIDER_CALL.clear()
     yield
     api_main._ANALYSIS_CACHE.clear()
+    api_main._LAST_PROVIDER_CALL.clear()
 
 
 def make_client(tmp_path, monkeypatch) -> TestClient:
@@ -196,3 +198,113 @@ def test_symbol_ids_with_a_slash_are_routable(tmp_path, monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["symbol"] == "BTC/USD:BTC"
+
+class FakeAdapter:
+    """A provider stand-in for the refresh, throttle and resample tests."""
+
+    def __init__(self, by_timeframe):
+        self.by_timeframe = by_timeframe
+        self.calls: list[tuple[str, str]] = []
+
+    async def get_candles(self, canonical_id, timeframe, start=None, end=None, limit=None,
+                          closed_only=True):
+        from engine.data.base import DataAdapterError
+        self.calls.append((canonical_id, timeframe.value))
+        if timeframe not in self.by_timeframe:
+            raise DataAdapterError(f"fake provider does not serve {timeframe.value}")
+        return list(self.by_timeframe[timeframe])[-int(limit or 500):]
+
+
+def test_candles_refresh_polls_the_provider_once_and_then_throttles(tmp_path, monkeypatch):
+    client = make_client(tmp_path, monkeypatch)
+    candles = wave_candles(300)
+    seed_store(candles)
+    newer = [
+        Candle(symbol="GBPUSD", timeframe=Timeframe.H1,
+               open_time=candles[-1].open_time + timedelta(hours=offset),
+               open=1.25, high=1.26, low=1.24, close=1.255, tick_volume=3, source="test")
+        for offset in range(1, 6)
+    ]
+    import services.api.main as api_main
+    fake = FakeAdapter({Timeframe.H1: [*candles, *newer]})
+    monkeypatch.setattr(api_main, "adapter_for_symbol", lambda canonical_id: fake)
+
+    first = client.get("/candles", params={"symbol": "GBPUSD", "timeframe": "H1",
+                                           "limit": 400, "refresh": "true"}).json()
+    second = client.get("/candles", params={"symbol": "GBPUSD", "timeframe": "H1",
+                                            "limit": 400, "refresh": "true"}).json()
+
+    assert first["refreshed"] is True and first["source"] != "store"
+    assert first["count"] == 305 and len(fake.calls) == 1
+    assert second["refreshed"] is False and second["refresh_skipped"]
+    assert len(fake.calls) == 1, "the provider must not be polled twice inside the window"
+
+
+def test_weekly_candles_are_resampled_when_the_venue_has_none(tmp_path, monkeypatch):
+    """A 24/7 market trades every day, so its weekly bucket is complete at seven."""
+    client = make_client(tmp_path, monkeypatch)
+    day = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    daily = [
+        Candle(symbol="BTC/USD:BTC", timeframe=Timeframe.D1, open_time=day + timedelta(days=i),
+               open=62000.0, high=63000.0, low=61000.0, close=62500.0, tick_volume=7,
+               source="test")
+        for i in range(90)
+    ]
+    seed_store(daily)
+    import services.api.main as api_main
+    fake = FakeAdapter({Timeframe.D1: daily})
+    monkeypatch.setattr(api_main, "adapter_for_symbol", lambda canonical_id: fake)
+
+    body = client.get("/candles", params={"symbol": "BTC/USD:BTC", "timeframe": "W1",
+                                          "limit": 50}).json()
+
+    assert body["symbol"] == "BTC/USD:BTC"
+    assert body["timeframe"] == "W1"
+    assert body["source"].endswith("+resample")
+    assert body["count"] >= 8
+    for row in body["candles"]:
+        stamp = int(datetime.fromisoformat(row["time"]).timestamp())
+        assert stamp % Timeframe.W1.seconds == 0
+        assert row["closed"] is True
+
+
+def test_overlays_carry_the_engine_atr_for_the_indicator_pane(tmp_path, monkeypatch):
+    client = make_client(tmp_path, monkeypatch)
+    candles = wave_candles(300)
+    seed_store(candles)
+
+    body = client.get("/overlays/GBPUSD", params={"timeframe": "H1", "bars": 400}).json()
+
+    assert body["atr_period"] == 14
+    from engine.config import load_params
+    from engine.foundation import compute_foundation
+    foundation = compute_foundation(candles, k=int(load_params().foundation.pivot.k_by_timeframe["H1"]))
+    expected = [(candles[i].open_time.isoformat(), foundation.atr_at(i))
+                for i in range(len(candles)) if foundation.atr_at(i) is not None]
+    assert len(body["atr"]) == len(expected) == len(candles) - 13
+    assert body["atr"][-1]["time"] == expected[-1][0]
+    assert abs(body["atr"][-1]["value"] - expected[-1][1]) < 1e-12
+
+def test_a_forex_week_is_five_daily_candles_not_seven(tmp_path, monkeypatch):
+    '''Session markets trade five days a week, so a weekly bucket is complete at five.'''
+    client = make_client(tmp_path, monkeypatch)
+    day = datetime(2026, 1, 5, tzinfo=timezone.utc)  # a Monday
+    daily = [
+        Candle(symbol="GBPUSD", timeframe=Timeframe.D1,
+               open_time=day + timedelta(days=week * 7 + weekday),
+               open=1.25, high=1.26, low=1.24, close=1.255, tick_volume=7, source="test")
+        for week in range(12)
+        for weekday in range(5)
+    ]
+    seed_store(daily)
+    import services.api.main as api_main
+    fake = FakeAdapter({Timeframe.D1: daily})
+    monkeypatch.setattr(api_main, "adapter_for_symbol", lambda canonical_id: fake)
+
+    body = client.get("/candles", params={"symbol": "GBPUSD", "timeframe": "W1",
+                                          "limit": 20}).json()
+
+    assert body["count"] >= 10
+    assert body["source"].endswith("+resample")
+    for row in body["candles"]:
+        assert datetime.fromisoformat(row["time"]).weekday() == 3  # epoch-aligned weeks start Thursday

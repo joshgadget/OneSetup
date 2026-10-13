@@ -31,7 +31,7 @@ from engine.modules import support_resistance as sr_module
 from engine.scoring.gate import symbol_gate
 from engine.scoring.pipeline import choose_setup, fit_and_calibrate, rank_candidates, test_calibration
 
-ANALYSIS_VERSION = "1.0.0"
+ANALYSIS_VERSION = "1.1.0"
 MAX_OVERLAY_ITEMS = 300
 
 
@@ -60,10 +60,17 @@ def overlays_from_context(ctx: SeriesContext) -> dict:
     def tail(rows: list) -> list:
         return rows[-MAX_OVERLAY_ITEMS:]
 
+    atr_rows = []
+    for index, candle in enumerate(candles):
+        value = foundation.atr_at(index)
+        if value is not None:
+            atr_rows.append({"time": _iso(candle), "value": value})
     return {
         "symbol": candles[0].symbol,
         "timeframe": candles[0].timeframe.value,
         "as_of": _iso(candles[-1]),
+        "atr_period": int(params.foundation.atr_period),
+        "atr": atr_rows,
         "counts": {
             "levels": len(levels), "zones": len(zones), "pools": len(ctx.pools),
             "grabs": len(ctx.grabs), "fvgs": len(fvgs), "order_blocks": len(blocks),
