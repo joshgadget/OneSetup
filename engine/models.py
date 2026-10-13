@@ -20,11 +20,36 @@ def utcnow() -> datetime:
 
 
 class MarketClass(str, Enum):
+    """Instrument families the platform can reason about.
+
+    The spec names forex, gold, crypto futures/perpetuals and Deriv synthetic
+    indices. The extra classes exist because the reachable providers also list
+    index CFDs, other metals and spot crypto, and those need correct session and
+    gap handling rather than being forced into the wrong family.
+    """
+
     FOREX = "forex"
     GOLD = "gold"
+    COMMODITY = "commodity"        # other metals: silver, platinum, palladium
+    INDEX = "index"                # cash index CFDs (have daily session breaks)
     CRYPTO_PERP = "crypto_perp"
     CRYPTO_FUTURES = "crypto_futures"
+    CRYPTO_SPOT = "crypto_spot"    # spot / CFD crypto: no funding, no expiry
     SYNTHETIC = "synthetic"
+
+    @property
+    def trades_continuously(self) -> bool:
+        """True for instruments with no session breaks at all."""
+        return self in (
+            MarketClass.CRYPTO_PERP,
+            MarketClass.CRYPTO_FUTURES,
+            MarketClass.CRYPTO_SPOT,
+            MarketClass.SYNTHETIC,
+        )
+
+    @property
+    def has_sessions(self) -> bool:
+        return not self.trades_continuously
 
 
 _TF_SECONDS: dict[str, int] = {
@@ -197,6 +222,11 @@ class SymbolInfo(BaseModel):
     market_class: MarketClass
     venue: str
     provider_symbols: dict[str, str] = Field(default_factory=dict)
+    tags: dict[str, str] = Field(default_factory=dict)
+
+    @property
+    def providers(self) -> list[str]:
+        return sorted(self.provider_symbols)
 
 
 class ModuleSignal(BaseModel):

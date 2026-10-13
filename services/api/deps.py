@@ -1,4 +1,10 @@
-"""Wiring: store singleton and one cached adapter per provider."""
+"""Wiring: store singleton, one cached adapter per provider, and symbol routing.
+
+Routing is by venue, not by market class, so a new instrument family (index CFDs,
+metals, spot crypto) does not need a code change - only the provider that serves it.
+The store is consulted before the seed registry, so anything discovery has stored is
+fetchable.
+"""
 from __future__ import annotations
 
 from functools import lru_cache
@@ -8,9 +14,9 @@ from engine.data.base import DataAdapter, DataAdapterError
 from engine.data.crypto_ccxt import CCXTAdapter
 from engine.data.deriv import DerivAdapter
 from engine.data.fxcm import FXCMAdapter
+from engine.data.registry import get_symbol as seed_symbol
 from engine.data.store import CandleStore
-from engine.models import MarketClass, SymbolInfo
-from engine.data.registry import get_symbol
+from engine.models import SymbolInfo
 
 
 @lru_cache(maxsize=1)
@@ -35,17 +41,22 @@ def get_deriv() -> DerivAdapter:
 
 
 def adapter_for(info: SymbolInfo) -> DataAdapter:
-    if info.market_class in (MarketClass.FOREX, MarketClass.GOLD):
+    venue = info.venue.upper()
+    if venue == "FXCM":
         return get_fxcm()
-    if info.market_class in (MarketClass.CRYPTO_PERP, MarketClass.CRYPTO_FUTURES):
-        return get_ccxt()
-    if info.market_class is MarketClass.SYNTHETIC:
+    if venue == "DERIV":
         return get_deriv()
-    raise DataAdapterError(f"no adapter for market class {info.market_class}")
+    return get_ccxt()
+
+
+def find_symbol(canonical_id: str) -> SymbolInfo | None:
+    """Store first (discovery result), then the seed registry, then alias lookup."""
+    store = get_store()
+    return store.get_symbol(canonical_id) or store.resolve_symbol(canonical_id) or seed_symbol(canonical_id)
 
 
 def adapter_for_symbol(canonical_id: str) -> DataAdapter:
-    info = get_symbol(canonical_id)
+    info = find_symbol(canonical_id)
     if info is None:
         raise DataAdapterError(f"unknown symbol {canonical_id!r}; see GET /symbols")
     return adapter_for(info)

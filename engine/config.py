@@ -27,8 +27,15 @@ class Settings(BaseSettings):
     fxcm_access_token: str = ""
     fxcm_host: str = "api-demo.fxcm.com"
     fxcm_price_side: str = "mid"
+    fxcm_login_id: str = ""
+    fxcm_password: str = ""
+    fxcm_iam_host: str = "endpoints-demo.fxcm.com"
 
     deriv_app_id: str = ""
+
+    # Which provider serves FX and gold. Switching broker feed = one env var.
+    forex_venue: str = "deriv"
+    gold_venue: str = "deriv"
 
     crypto_exchange: str = "deribit"
 
