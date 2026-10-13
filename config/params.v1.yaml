@@ -61,6 +61,7 @@ liquidity:
   pool_level_update: on_new_confirmed_swing  # [GAP] level update rule
   breakout_confirm_atr: 0.10           # [GAP] "closes beyond P and keeps going" needs a buffer
   swept_pools_as_targets: false        # [GAP] exclude swept pools from target selection
+  standalone_stop_buffer_atr: 0.10     # [GAP] the spec gives liquidity no entry rule; this is ours
 
 slp:
   bias_timeframe: H4                   # SLP: HTF bias example H4, LTF M15
@@ -143,6 +144,13 @@ gate:
   oos_fraction: 0.30                   # [GAP] out-of-sample fraction for the gate
   min_resolved_candidates: 500         # [GAP] minimum sample per module/timeframe
   min_bounce_entries: 1000             # [GAP] minimum level entries for bounce estimate
+  split:                               # [GAP] the spec fixes the order, not the sizes
+    train_fraction: 0.50
+    validation_fraction: 0.20
+    test_fraction: 0.30
+  walk_forward_windows: 4              # [GAP] rolling refit count
+  min_trades_for_verdict: 30           # [GAP] below this the study reports no verdict
+  control_seed: 20261013               # [GAP] fixed seed for the random-anchor control
 
 markets:
   forex:        {sessions: true,  weekend_gaps: true,  real_volume: false}
@@ -157,6 +165,10 @@ execution:                             # Phase 6 backtester parameters, recorded
   commission_per_lot: 0.0
   slippage_atr: 0.0
   limit_fill: touch
+  entry_expiry_candles: 20             # [GAP] how long a resting limit stays valid
+  outcome_expiry_candles: 40           # [GAP] unresolved trades exit at market after this
+  ambiguous_candle_rule: stop_first    # [GAP] stop and target in one candle cannot be ordered
+  funding_intervals_per_day: 3         # 8-hour funding, the Binance and Deribit convention
   unresolved_expiry_exit: market       # [GAP] unresolved trades exit at expiry at market
   funding_holding_period: median_time_to_resolution   # [GAP]
   liquidation_stop_margin: max_0.25ATR_or_20pct       # [GAP] "comfortably inside P_liq"
